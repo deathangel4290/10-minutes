@@ -134,7 +134,7 @@ export class Combat {
 
     if (e.def.splitInto) {
       for (let i = 0; i < e.def.splitCount; i++) {
-        const child = run.director.spawnAt(e.def.splitInto, e.x + run.rng.range(-5, 5), e.y + run.rng.range(-5, 5), { elite: e.elite, cursed: e.cursed });
+        const child = run.director.spawnAt(e.def.splitInto, e.x + run.rng.range(-5, 5), e.y + run.rng.range(-5, 5), { cursed: e.cursed });
         if (child) {
           child.spawnT = 0;
           child.vx = run.rng.range(-60, 60);

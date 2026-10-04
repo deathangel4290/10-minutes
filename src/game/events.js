@@ -58,14 +58,16 @@ export class Events {
     }
 
     // Merchants leave after a while.
+    let gone = false;
     for (const poi of run.pois) {
       if (poi.type === 'merchant' && !poi.gone && run.timeLeft <= poi.expiresAt) {
-        poi.gone = true;
+        poi.gone = gone = true;
         poi.radius = 0;
         run.effects.burst(poi.x, poi.y - 8, ['#6e4a2c', '#ffd36b'], 10, 40, 0.5, 0);
+        run.hooks.toast('The merchant has moved on.', 'muted');
       }
     }
-    run.pois = run.pois.filter((p) => !p.gone);
+    if (gone) run.pois = run.pois.filter((p) => !p.gone);
 
     // Ambush completion.
     if (this.activeAmbush) {

@@ -445,9 +445,6 @@ class App {
         }
         if (steps >= 5) this.acc = 0;
       }
-    } else if (run.modal && !this.paused) {
-      // A level-up queued while playing opens on the next update call.
-      run.update(0, input);
     }
     this.heldEdges = steps === 0 && !run.modal && !this.paused ? { dash: input.dash, nova: input.nova, potion: input.potion } : { dash: false, nova: false, potion: false };
 
@@ -505,6 +502,8 @@ class App {
 const app = new App();
 window.__game = app; // handy for debugging and automated tests
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !location.hostname.match(/^(localhost|127\.)/)) {
+// Offline support when served as a standalone page (skipped on localhost and inside embeds).
+const standalone = window.self === window.top;
+if (standalone && 'serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
