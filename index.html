@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#0b0912" />
+    <meta name="description" content="Last 10 Minutes — survive, loot, escape... or risk it all." />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Last 10 Min" />
+    <title>Last 10 Minutes</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Silkscreen&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game" aria-label="Game view"></canvas>
+      <canvas id="hub-canvas" aria-hidden="true"></canvas>
+      <div id="fx-vignette" aria-hidden="true"></div>
+      <div id="fx-flash" aria-hidden="true"></div>
+
+      <div id="controls" class="hidden">
+        <div id="joy-base"><div id="joy-knob"></div></div>
+        <div class="btn-cluster">
+          <button data-btn="potion" id="btn-potion" class="act act-sm" aria-label="Drink potion"><img alt="" /><span class="badge"></span></button>
+          <button data-btn="nova" id="btn-nova" class="act act-md" aria-label="Eclipse Nova"><span class="fill"></span><img alt="" /></button>
+          <button data-btn="dash" id="btn-dash" class="act act-md" aria-label="Dash"><span class="cd"></span><img alt="" /></button>
+          <button data-btn="attack" id="btn-attack" class="act act-lg" aria-label="Attack"><img alt="" /></button>
+        </div>
+      </div>
+
+      <div id="hud" class="hidden">
+        <div class="hud-top">
+          <div class="hud-bars">
+            <div class="bar bar-hp"><img class="bar-icon" alt="" /><div class="bar-track"><div class="bar-fill"></div><span class="bar-text"></span></div></div>
+            <div class="bar bar-energy"><img class="bar-icon" alt="" /><div class="bar-track"><div class="bar-fill"></div></div></div>
+            <div class="bar bar-xp"><span class="lvl">LV 1</span><div class="bar-track"><div class="bar-fill"></div></div></div>
+          </div>
+          <div class="hud-timer">
+            <div class="timer">10:00</div>
+            <div class="danger">LOW DANGER</div>
+          </div>
+          <div class="hud-right">
+            <div class="hud-row">
+              <div class="gold"><img alt="" /><span>0</span></div>
+              <button id="btn-pause" class="icon-btn" aria-label="Pause">II</button>
+            </div>
+            <canvas id="minimap" width="80" height="80" aria-label="Minimap"></canvas>
+          </div>
+        </div>
+        <div id="champion-bar" class="hidden"><span>BONE COLOSSUS</span><div class="bar-track"><div class="bar-fill"></div></div></div>
+        <div id="toasts"></div>
+        <div id="banner" class="hidden"><div class="banner-title"></div><div class="banner-sub"></div></div>
+        <div id="countdown"></div>
+        <div id="pickup-card" class="hidden"></div>
+      </div>
+
+      <div id="screen" class="hidden"></div>
+      <div id="modal" class="hidden"></div>
+    </div>
+    <noscript>Last 10 Minutes needs JavaScript to run.</noscript>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

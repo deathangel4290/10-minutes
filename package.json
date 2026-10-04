@@ -1,0 +1,16 @@
+{
+  "name": "last-10-minutes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A 10-minute dark fantasy roguelike for mobile: survive, loot, escape... or risk it all.",
+  "type": "module",
+  "scripts": {
+    "start": "npx --yes http-server -c-1 -p 8080 .",
+    "test": "node --test tests/*.test.js",
+    "sim": "node tools/sim.mjs 10",
+    "icons": "node tools/make-icons.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
