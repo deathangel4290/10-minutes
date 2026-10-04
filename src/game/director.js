@@ -60,12 +60,14 @@ export class Director {
 
     // Continuous spawning.
     const p = run.phase;
-    const rate = lerp(p.spawnRate[0], p.spawnRate[1], this.phaseProgress()) * run.spawnRateMult;
+    const surge = run.timeLeft <= 60; // the last minute floods the field
+    const rate = lerp(p.spawnRate[0], p.spawnRate[1], this.phaseProgress()) * run.spawnRateMult * (surge ? 1.4 : 1);
+    const maxAlive = p.maxAlive + (surge ? 20 : 0);
     const alive = run.enemies.length;
     this.acc += rate * dt;
     while (this.acc >= 1) {
       this.acc -= 1;
-      if (alive >= p.maxAlive) {
+      if (alive >= maxAlive) {
         this.acc = Math.min(this.acc, 1);
         break;
       }

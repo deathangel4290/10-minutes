@@ -56,9 +56,9 @@ export const PHASES = [
     until: -1,
     name: 'EXTREME DANGER',
     banner: { title: 'FINAL MINUTES', sub: 'Rare loot. Deadly foes. Reach a gate.' },
-    spawnRate: [2.4, 3.6],
-    maxAlive: 85,
-    eliteChance: 0.035,
+    spawnRate: [2.6, 4.2],
+    maxAlive: 95,
+    eliteChance: 0.05,
     itemLevel: 4,
     mix: { skeleton: 4, slime: 3, wolf: 5 },
     darkness: 0.6,
@@ -75,8 +75,9 @@ export function phaseForTimeLeft(timeLeft) {
 export function enemyScaling(elapsed) {
   const t = elapsed / RUN_DURATION;
   return {
-    hp: 1 + t * 2.6 + t * t * 3.4,
-    damage: 1 + t * 1.2 + t * t * 0.9,
+    // The cubic terms keep the early game steady and make the last minutes brutal.
+    hp: 1 + t * 2.6 + t * t * t * 5,
+    damage: 1 + t * 1.1 + t * t * t * 2.2,
     speed: 1 + t * 0.12,
   };
 }

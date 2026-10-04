@@ -27,7 +27,8 @@ export class Enemy {
     this.maxHp = Math.round(def.hp * hpMult);
     this.hp = this.maxHp;
     this.damage = def.damage * scale.damage * (elite ? ELITE.damageMult : 1) * (cursed ? CURSED_ZONE.damageMult : 1);
-    this.speed = def.speed * scale.speed * (elite ? ELITE.speedMult : 1) * run.rng.range(0.92, 1.08);
+    const surge = run.timeLeft <= 60 ? 1.12 : 1;
+    this.speed = def.speed * scale.speed * surge * (elite ? ELITE.speedMult : 1) * run.rng.range(0.92, 1.08);
     this.radius = def.radius + (elite ? 1 : 0);
     this.knockTaken = def.knockbackTaken * (elite ? ELITE.knockbackMult : 1);
     this.state = 'chase';
