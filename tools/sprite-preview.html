@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Sprite Preview</title>
+<style>body{background:#16231f;margin:0;color:#ccc;font:12px monospace} canvas{image-rendering:pixelated}</style></head>
+<body><canvas id="c"></canvas>
+<script type="module">
+import { buildSprites } from '../src/gfx/sprites.js';
+const S = buildSprites();
+const c = document.getElementById('c');
+const W = 260, H = 200, SC = 4;
+c.width = W; c.height = H; c.style.width = W*SC+'px'; c.style.height = H*SC+'px';
+const ctx = c.getContext('2d');
+ctx.fillStyle = '#1a2924'; ctx.fillRect(0,0,W,H);
+let x = 2, y = 2, rowH = 0;
+function put(img){ if (x + img.width > W) { x = 2; y += rowH + 3; rowH = 0; } ctx.drawImage(img, x, y); x += img.width + 3; rowH = Math.max(rowH, img.height); }
+['player_idle','player_runA','player_runB'].forEach(n=>{put(S[n].r);put(S[n].l);put(S[n].flashR);});
+S.skeleton.forEach(b=>put(b.r)); S.skeletonElite.forEach(b=>put(b.r)); S.champion.forEach(b=>put(b.r));
+put(S.slime[0].r); put(S.slimeElite[0].r); put(S.slimeling[0].r);
+S.wolf.forEach(b=>put(b.r)); S.wolfElite.forEach(b=>put(b.l));
+Object.values(S.chest).forEach(put); Object.values(S.chestOpen).forEach(put); put(S.chestMystery);
+S.coin.forEach(put); put(S.shard); put(S.shardBig); put(S.potion);
+Object.values(S.shrine).forEach(put); put(S.merchant.r); put(S.grave); put(S.rock); put(S.bones); put(S.pillar); put(S.pillarBroken); put(S.torch);
+for (const id of ['sword','dagger','axe']) for (const r of ['common','rare','legendary']) put(S.weapons[id][r].img);
+S.pines.forEach(put); S.roundTrees.forEach(put); S.deadTrees.forEach(put); S.bushes.forEach(put);
+for (const n of ['heart','sword','dagger','axe','bolt','boot','crit','skull','star','plus','shield','thorn','drop','magnet','coin','gem','clover','feather','flame','potion','eye','hourglass','chest','ember']) put(S.icon(n,'epic'));
+window.done = true;
+</script></body></html>
