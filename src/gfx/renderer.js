@@ -1,7 +1,7 @@
 // Draws a Run to a low-resolution canvas that CSS scales up by an integer
 // factor (crisp pixels, cheap on weak phones).
 
-import { TILE, TARGET_VIEW_WIDTH } from '../data/config.js';
+import { TILE, TARGET_VIEW_WIDTH, TARGET_VIEW_HEIGHT_WIDE } from '../data/config.js';
 import { PLAYER_HAND } from './art.js';
 import { makeCanvas } from './sprites.js';
 import { bakeBackground, ellipse } from './background.js';
@@ -33,10 +33,10 @@ export class Renderer {
     this.shadows = {};
   }
 
-  resize(cssW, cssH, dpr) {
+  resize(cssW, cssH, dpr, wide = false) {
     const devW = Math.max(1, Math.round(cssW * dpr));
     const devH = Math.max(1, Math.round(cssH * dpr));
-    this.scale = Math.max(1, Math.round(devW / TARGET_VIEW_WIDTH));
+    this.scale = Math.max(1, Math.round(wide ? devH / TARGET_VIEW_HEIGHT_WIDE : devW / TARGET_VIEW_WIDTH));
     this.W = Math.ceil(devW / this.scale);
     this.H = Math.ceil(devH / this.scale);
     this.canvas.width = this.W;

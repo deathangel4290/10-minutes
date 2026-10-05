@@ -7,6 +7,11 @@ export const RUN_DURATION = 600; // seconds — the "10 minutes"
 // Target logical (game-pixel) width of the view in portrait. The canvas is
 // rendered at this low resolution and scaled up by an integer factor.
 export const TARGET_VIEW_WIDTH = 176;
+// In landscape the short side is the height, so the view is sized by it
+// instead: you see further left and right, and a little less up and down.
+export const TARGET_VIEW_HEIGHT_WIDE = 200;
+// Screens wider than this (width / height) use the landscape layout.
+export const LANDSCAPE_ASPECT = 1.15;
 
 // Danger phases, keyed by time REMAINING on the clock.
 // Each phase sets spawn pressure, enemy mix, loot quality and mood.

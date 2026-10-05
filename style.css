@@ -694,6 +694,12 @@ button {
   align-items: center;
 }
 
+.vendor-head .modal-title,
+.vendor-head .modal-sub {
+  text-align: left;
+  margin: 0;
+}
+
 .vendor-head img {
   width: 64px;
   height: 64px;
@@ -920,8 +926,13 @@ button {
   background: rgba(5, 3, 10, 0.72);
   display: flex;
   flex-direction: column;
-  justify-content: center;
   animation: fade-in 0.15s ease-out;
+}
+
+/* Centered when it fits, scrollable from the top when it doesn't. */
+#modal > * {
+  margin-top: auto;
+  margin-bottom: auto;
 }
 
 @keyframes fade-in {
@@ -1541,10 +1552,15 @@ button {
 }
 
 /* Results */
-.results {
+.results,
+.res-a,
+.res-b {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.results {
   min-height: 100%;
   justify-content: center;
 }
@@ -1920,4 +1936,211 @@ button {
     transform: scale(0.9);
     transform-origin: bottom right;
   }
+}
+
+/* ── Landscape (sideways) ─────────────────────────────── */
+/* Turning the phone sideways switches to this layout: the game fills the
+   width, the HUD stays a slim top strip and menus split into two columns. */
+body:not(.landscape) .only-wide,
+body.landscape .only-tall {
+  display: none;
+}
+
+body.landscape #app {
+  width: 100%;
+}
+
+body.landscape #status {
+  top: calc(64px + var(--safe-top));
+}
+
+body.landscape #champion-bar {
+  top: calc(64px + var(--safe-top));
+}
+
+body.landscape #toasts {
+  top: calc(86px + var(--safe-top));
+}
+
+body.landscape #pickup-card {
+  bottom: calc(10px + var(--safe-bottom));
+  width: min(40%, 320px);
+}
+
+body.landscape .btn-cluster {
+  bottom: calc(14px + var(--safe-bottom));
+}
+
+body.landscape #screen,
+body.landscape #modal {
+  padding: calc(8px + var(--safe-top)) calc(16px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+
+body.landscape .panel {
+  width: 100%;
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 12px 14px;
+}
+
+body.landscape .panel.wide {
+  max-width: 780px;
+}
+
+body.landscape .panel.split {
+  max-width: 640px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 16px;
+  align-items: center;
+}
+
+body.landscape .panel.split.wide {
+  max-width: 780px;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: start;
+}
+
+/* The left column stays put while a long list scrolls beside it. */
+body.landscape .split.wide .col-a {
+  position: sticky;
+  top: 0;
+}
+
+body.landscape .split .col-b > .btn-row:first-child {
+  margin-top: 0;
+}
+
+body.landscape .modal-title {
+  font-size: 22px;
+}
+
+body.landscape .modal-sub {
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+body.landscape .btn {
+  padding: 9px 12px;
+  font-size: 15px;
+}
+
+body.landscape .btn-small {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+body.landscape .btn-row {
+  gap: 6px;
+  margin-top: 8px;
+}
+
+body.landscape .split.wide .vendor-head {
+  flex-direction: column;
+  text-align: center;
+}
+
+body.landscape .split.wide .vendor-head .modal-title,
+body.landscape .split.wide .vendor-head .modal-sub {
+  text-align: center;
+}
+
+body.landscape .event-art {
+  height: 80px;
+}
+
+body.landscape .event-art img {
+  height: 70px;
+}
+
+/* Level up: the three choices side by side. */
+body.landscape .lvl-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+body.landscape .up-card {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-content: start;
+  text-align: center;
+  padding: 12px 10px;
+}
+
+body.landscape .up-card .meta {
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+body.landscape .regions {
+  grid-template-columns: 1fr 1fr;
+}
+
+body.landscape .records-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.landscape .settings {
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+body.landscape .set-row input[type='range'] {
+  width: 110px;
+}
+
+body.landscape .paperdoll .doll {
+  width: 80px;
+  height: 80px;
+}
+
+/* Title: the logo over the sky on the left, the buttons on the right. */
+body.landscape .title-wrap {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-around;
+  gap: 24px;
+}
+
+body.landscape .logo {
+  margin-top: 0;
+  align-self: flex-start;
+  padding-top: 4vh;
+}
+
+body.landscape .logo h1 {
+  font-size: clamp(34px, 11vh, 56px);
+}
+
+body.landscape .title-bottom {
+  width: min(44%, 380px);
+}
+
+/* Results: how the run went on the left, the loot and what's next on the right. */
+body.landscape .results {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 18px;
+  align-items: center;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+body.landscape .res-a,
+body.landscape .res-b {
+  gap: 8px;
+}
+
+body.landscape .res-title {
+  font-size: 38px;
+}
+
+body.landscape .res-b .btn-row {
+  grid-template-columns: 1fr 1fr;
+}
+
+body.landscape .embers-rows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
 }

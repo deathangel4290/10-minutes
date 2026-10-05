@@ -16,6 +16,7 @@ import { iconURL } from './gfx/sprites.js';
 import { formatInt } from './core/math.js';
 import { computeEmbers } from './game/score.js';
 import { META_BY_ID, UNLOCK_BY_ID, nextMetaCost, affordableItems } from './data/meta.js';
+import { LANDSCAPE_ASPECT } from './data/config.js';
 
 const STEP = 1 / 60;
 
@@ -119,13 +120,18 @@ class App {
   }
 
   handleResize() {
+    // Sideways screens get the landscape layout: the game fills the width
+    // and the HUD tucks into a slim top strip.
+    const wide = window.innerWidth > window.innerHeight * LANDSCAPE_ASPECT;
+    document.body.classList.toggle('landscape', wide);
+    this.input.joyZone = wide ? 0.5 : 0.62;
     const w = this.app.clientWidth;
     const h = this.app.clientHeight;
     const dpr = Math.min(3, window.devicePixelRatio || 1);
-    this.renderer.resize(w, h, dpr);
+    this.renderer.resize(w, h, dpr, wide);
     this.hub.resize(w, h);
     const pxPerCss = dpr / this.renderer.scale;
-    this.renderer.safeTop = Math.ceil(118 * pxPerCss);
+    this.renderer.safeTop = Math.ceil((wide ? 58 : 118) * pxPerCss);
     this.renderer.safeBottom = Math.ceil(20 * pxPerCss);
     for (const scene of [this.run, this.town]) {
       if (!scene) continue;

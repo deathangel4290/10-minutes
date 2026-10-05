@@ -2,7 +2,7 @@
 
 **Survive · Loot · Escape · or risk it all.**
 
-A dark-fantasy pixel-art roguelike built for phones in portrait mode. Every run is exactly ten minutes long. You start with a rusty sword, scavenge for better weapons and relics, level up into a build, and decide when to leave through a Rift Gate. Staying longer means better loot and more Embers, until the clock hits 0:00 and the eclipse takes everything you carried.
+A dark-fantasy pixel-art roguelike built for phones, playable upright or sideways. Every run is exactly ten minutes long. You start with a rusty sword, scavenge for better weapons and relics, level up into a build, and decide when to leave through a Rift Gate. Staying longer means better loot and more Embers, until the clock hits 0:00 and the eclipse takes everything you carried.
 
 This is a playable prototype. It focuses on the core "one more run" loop:
 
@@ -30,7 +30,8 @@ This is a playable prototype. It focuses on the core "one more run" loop:
 - **Results screen:** cause of death, everything you lost, a breakdown of Embers earned (with a region bonus), and "NEW REGION UNLOCKED" or "NEW UNLOCK AVAILABLE" prompts. **TRY AGAIN** replays the same region instantly.
 - **Saves and settings** live in local storage. The game also autosaves a salvage snapshot, so closing the app mid-run doesn't wipe it.
 - **Audio** is fully synthesized with WebAudio. The music adds layers and speeds up with each danger phase.
-- It's an **installable PWA** with offline support and portrait lock.
+- **Portrait and landscape:** turn the phone sideways and the game switches layouts. The view widens, the HUD becomes a slim top strip, the controls sit in the bottom corners, and menus split into two columns (level-up choices side by side, vendor wares beside the shopkeeper). You can rotate mid-run. Desktop browsers get the landscape layout too.
+- It's an **installable PWA** with offline support.
 
 ## Running it
 
@@ -110,7 +111,7 @@ Most content changes only touch `src/data/`:
 
 ## Performance
 
-The world renders at a low internal resolution (~170 px wide) that CSS scales up by an integer factor, so pixels stay crisp and the GPU does little work. The ground is baked once per map, sprites are pre-rendered, and effects are pooled. In headless Chromium with software rendering, a final-minute horde of about 90 enemies costs around 1.5 ms per frame. Setting graphics to **Low** turns off dynamic lighting and halves particles.
+The world renders at a low internal resolution (~170 px wide in portrait, ~200 px tall in landscape) that CSS scales up by an integer factor, so pixels stay crisp and the GPU does little work. The ground is baked once per map, sprites are pre-rendered, and effects are pooled. In headless Chromium with software rendering, a final-minute horde of about 90 enemies costs around 1.5 ms per frame. Setting graphics to **Low** turns off dynamic lighting and halves particles.
 
 ## Deploying
 

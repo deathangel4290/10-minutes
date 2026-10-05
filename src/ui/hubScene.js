@@ -28,8 +28,10 @@ export class HubScene {
   }
 
   resize(cssW, cssH) {
-    const W = 128;
-    const H = Math.max(160, Math.round((cssH / cssW) * W));
+    // Keep pixels square in either orientation: the short side is fixed.
+    const wide = cssW > cssH;
+    const W = wide ? Math.round((cssW / cssH) * 136) : 128;
+    const H = wide ? 136 : Math.max(160, Math.round((cssH / cssW) * W));
     if (this.W === W && this.H === H) return;
     this.W = W;
     this.H = H;
