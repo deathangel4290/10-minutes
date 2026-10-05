@@ -10,6 +10,10 @@ import { Screens } from './ui/screens.js';
 import { HubScene } from './ui/hubScene.js';
 import { $ } from './ui/dom.js';
 import { Run } from './game/run.js';
+import { Town } from './game/town.js';
+import { VENDORS, TOWN_NAME } from './data/town.js';
+import { iconURL } from './gfx/sprites.js';
+import { formatInt } from './core/math.js';
 import { computeEmbers } from './game/score.js';
 import { META_BY_ID, UNLOCK_BY_ID, nextMetaCost, affordableItems } from './data/meta.js';
 
@@ -23,22 +27,42 @@ class App {
     this.renderer = new Renderer($('#game'), this.sprites);
     this.audio = new AudioEngine();
     this.hub = new HubScene($('#hub-canvas'));
-    this.hud = new Hud({ onPause: () => this.pause(), onEquip: (uid) => this.run && this.run.equipWeapon(uid) });
-    this.screens = new Screens({ onAction: (a, d) => this.action(a, d) });
+    this.hud = new Hud({ onPause: () => this.pause(), onEquip: (uid) => this.run && this.run.equipItem(uid), onGear: () => this.openGear() });
+    this.screens = new Screens({ onAction: (a, d) => this.action(a, d), sprites: this.sprites });
     this.input = new Input($('#controls'), {
       joyBase: $('#joy-base'),
       joyKnob: $('#joy-knob'),
       buttons: { attack: $('#btn-attack'), dash: $('#btn-dash'), nova: $('#btn-nova'), potion: $('#btn-potion') },
     });
+    this.input.onGear = () => {
+      if (this.state !== 'run' || !this.run || this.run.modal) return;
+      if (this.paused) this.resume();
+      else this.openGear();
+    };
     this.input.onPause = () => {
+      if (this.state === 'town' && !this.town.modal && !this.screens.modalOpen) {
+        this.showTitle();
+        return;
+      }
       if (this.state === 'run' && !this.run.modal) {
         if (this.paused) this.resume();
         else this.pause();
       }
     };
 
+    $('#town-ember-icon').src = iconURL('ember', 'common', 2);
+    $('#town-hud').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-town]');
+      if (!b) return;
+      e.stopPropagation();
+      this.audio.play('ui');
+      if (b.dataset.town === 'settings') this.action('settings', {});
+      else this.showTitle();
+    });
+
     this.state = 'title';
     this.run = null;
+    this.town = null;
     this.paused = false;
     this.acc = 0;
     this.hitstop = 0;
@@ -103,9 +127,10 @@ class App {
     const pxPerCss = dpr / this.renderer.scale;
     this.renderer.safeTop = Math.ceil(118 * pxPerCss);
     this.renderer.safeBottom = Math.ceil(20 * pxPerCss);
-    if (this.run) {
-      this.run.viewW = this.renderer.W;
-      this.run.viewH = this.renderer.H;
+    for (const scene of [this.run, this.town]) {
+      if (!scene) continue;
+      scene.viewW = this.renderer.W;
+      scene.viewH = this.renderer.H;
     }
     this.input.resetJoystickVisual();
   }
@@ -115,27 +140,72 @@ class App {
     this.state = 'title';
     this.hud.hide();
     $('#controls').classList.add('hidden');
+    $('#town-hud').classList.add('hidden');
     this.hub.start();
     this.screens.hideModal();
     this.screens.title(this.save, notice);
     if (this.audio.ctx) this.audio.startMusic(-1);
   }
 
-  showCamp(tab = 'upgrades') {
-    this.state = 'camp';
-    this.campTab = tab;
-    this.hub.start();
+  /** Emberfall: walk to vendors to spend Embers, take the portal to start a run. */
+  showTown() {
+    this.audio.unlock();
+    this.state = 'town';
+    this.run = null;
+    this.paused = false;
+    this.hub.stop();
+    this.hud.hide();
+    this.screens.hideScreen();
     this.screens.hideModal();
-    this.screens.camp(this.save, tab);
+    this.town = new Town({
+      meta: this.save.meta,
+      hooks: {
+        sfx: (n) => this.audio.play(n),
+        openModal: (m) => this.renderTownModal(m),
+        closeModal: () => this.screens.hideModal(),
+        shake: (a) => this.renderer.addShake(a),
+      },
+      viewW: this.renderer.W,
+      viewH: this.renderer.H,
+    });
+    this.town.effects.quality = this.renderer.quality;
+    this.renderer.prepare(this.town);
+    $('#controls').classList.remove('hidden');
+    $('#controls').classList.add('town-mode');
+    $('#town-hud').classList.remove('hidden');
+    this.updateTownHud();
+    this.input.releaseAll();
+    this.input.enabled = true;
+    this.input.resetJoystickVisual();
+    this.audio.stopMusic();
+    if (this.audio.ctx) this.audio.startMusic(-1);
+    if (!this.save.townTutorialDone) {
+      this.hud.banner(TOWN_NAME.toUpperCase(), 'Walk to a vendor to shop. The Rift Portal is north.', 'gold');
+      this.save.townTutorialDone = true;
+      writeSave(this.save);
+    }
+  }
+
+  updateTownHud() {
+    $('#town-embers').textContent = formatInt(this.save.embers);
+  }
+
+  renderTownModal(m) {
+    this.input.releaseAll();
+    if (m.kind === 'vendor') this.screens.vendor(this.save, m.vendor);
+    else if (m.kind === 'portal') this.screens.portal(this.save);
+    else if (m.kind === 'board') this.screens.board(this.save);
   }
 
   // ── Runs ──────────────────────────────────────────────────
-  startRun() {
+  startRun(biome = this.lastBiome || 'forest') {
     this.audio.unlock();
     this.audio.play('ui');
+    this.lastBiome = biome;
     const seed = (Math.random() * 2 ** 32) >>> 0;
     this.run = new Run({
       seed,
+      biome,
       meta: this.save.meta,
       unlocks: this.save.unlocks,
       hooks: this.makeHooks(),
@@ -155,6 +225,9 @@ class App {
     this.hub.stop();
     this.screens.hideScreen();
     this.screens.hideModal();
+    this.town = null;
+    $('#town-hud').classList.add('hidden');
+    $('#controls').classList.remove('town-mode');
     this.hud.show();
     this.hud.lastCount = null;
     $('#controls').classList.remove('hidden');
@@ -166,7 +239,7 @@ class App {
     this.audio.startMusic(0);
     this.audio.setIntensity(0, false);
     this.finalMusic = false;
-    this.hud.banner('10:00', 'Survive. Loot. Escape before the eclipse.', 'purple');
+    this.hud.banner(this.run.biome.name.toUpperCase(), 'Survive. Loot. Escape before the eclipse.', 'purple');
   }
 
   makeHooks() {
@@ -222,6 +295,14 @@ class App {
     this.screens.pause(this.run);
   }
 
+  /** Equipment screen pauses the run while open. */
+  openGear(selectedUid = null) {
+    if (this.state !== 'run' || !this.run || this.run.ended || this.run.modal) return;
+    this.paused = true;
+    this.input.releaseAll();
+    this.screens.gear(this.run, selectedUid);
+  }
+
   resume() {
     this.paused = false;
     this.screens.hideModal();
@@ -272,11 +353,16 @@ class App {
     // Save immediately.
     const before = affordableItems(this.save).map((x) => `${x.kind}:${x.id}`);
     const embersBefore = this.save.embers;
-    const { newRecords } = recordRun(this.save, result);
+    const { newRecords, regionUnlocked } = recordRun(this.save, result);
     this.save.tutorialDone = true;
     const after = affordableItems(this.save);
     const fresh = after.filter((x) => !before.includes(`${x.kind}:${x.id}`));
-    this.pendingResults = { result, newRecords, unlockHint: fresh[0] || null, embersBefore };
+    let unlockHint = fresh[0] || null;
+    if (unlockHint) {
+      const v = VENDORS.find((vv) => vv.items.some((it) => it.kind === unlockHint.kind && it.id === unlockHint.id));
+      unlockHint = { ...unlockHint, vendor: v ? v.name : null };
+    }
+    this.pendingResults = { result, newRecords, unlockHint, regionUnlocked, embersBefore };
     writeSave(this.save);
   }
 
@@ -298,11 +384,16 @@ class App {
       case 'start':
         this.startRun();
         break;
-      case 'camp':
-        this.showCamp(this.campTab || 'upgrades');
+      case 'town':
+        this.showTown();
         break;
-      case 'campTab':
-        this.showCamp(d.tab);
+      case 'enterRegion':
+        this.screens.hideModal();
+        this.startRun(d.biome);
+        break;
+      case 'townClose':
+        if (this.town) this.town.closeModal();
+        else this.screens.hideModal();
         break;
       case 'title':
         this.showTitle();
@@ -317,7 +408,7 @@ class App {
           writeSave(this.save);
           this.audio.play('levelUp');
         }
-        this.showCamp('upgrades');
+        this.refreshVendor();
         break;
       }
       case 'buyUnlock': {
@@ -328,7 +419,7 @@ class App {
           writeSave(this.save);
           this.audio.play('legendary');
         }
-        this.showCamp('unlocks');
+        this.refreshVendor();
         break;
       }
       case 'pickUpgrade':
@@ -353,8 +444,22 @@ class App {
       case 'resume':
         this.resume();
         break;
+      case 'gear':
+        this.paused = false;
+        this.openGear();
+        break;
+      case 'gearSelect':
+        if (d.uid) this.screens.gear(this.run, d.uid);
+        break;
+      case 'gearEquip':
+        if (run && run.equipItem(Number(d.uid))) this.screens.gear(this.run, d.uid);
+        break;
+      case 'gearClose':
+        this.resume();
+        break;
       case 'settings':
         this.settingsBack = this.state === 'run' ? 'pauseBack' : 'settingsClose';
+        if (this.state === 'town') this.input.releaseAll();
         this.screens.settings(this.save.settings, this.settingsBack);
         break;
       case 'settingsClose':
@@ -403,11 +508,22 @@ class App {
     }
   }
 
+  refreshVendor() {
+    if (this.town && this.town.modal && this.town.modal.kind === 'vendor') this.screens.vendor(this.save, this.town.modal.vendor, false);
+    if (this.town) {
+      // New meta upgrades apply to the town hero too (speed, HP).
+      this.town.player.metaMods = Town.metaFor(this.save.meta);
+      this.town.player.recompute();
+    }
+    this.updateTownHud();
+  }
+
   // ── Main loop ─────────────────────────────────────────────
   frame(now) {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     if ((this.state === 'run' || this.state === 'ending') && this.run) this.tickRun(dt);
+    else if (this.state === 'town' && this.town) this.tickTown(dt);
     requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -451,6 +567,23 @@ class App {
     this.renderer.render(run, this.paused || run.modal ? 0 : dt);
     this.hud.update(run, dt);
     this.runAmbience(run, dt);
+  }
+
+  tickTown(dt) {
+    const town = this.town;
+    const input = this.input.read();
+    if (!town.modal && !this.screens.modalOpen) {
+      this.acc += dt;
+      let steps = 0;
+      while (this.acc >= STEP && steps < 5) {
+        town.update(STEP, steps === 0 ? input : { ...input, dash: false });
+        this.acc -= STEP;
+        steps++;
+        if (town.modal) break;
+      }
+      if (steps >= 5) this.acc = 0;
+    }
+    this.renderer.render(town, town.modal || this.screens.modalOpen ? 0 : dt);
   }
 
   runAmbience(run, dt) {

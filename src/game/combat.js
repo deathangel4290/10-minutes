@@ -12,6 +12,8 @@ export class Combat {
   constructor(run) {
     this.run = run;
     this.projectiles = [];
+    this.enemyProjectiles = [];
+    this.runes = [];
     this.pendingExplosions = [];
   }
 
@@ -56,7 +58,7 @@ export class Combat {
     run.stats.damageDealt += dmg;
 
     const h = e.def.scale ? 16 * e.def.scale : 14;
-    run.effects.number(e.x, e.y - h, dmg, crit ? '#ffab40' : opts.source === 'thorns' ? '#7fd65a' : '#f4f2ff', crit ? 2 : 1);
+    run.effects.number(e.x, e.y - h, dmg, crit ? '#ffab40' : opts.source === 'thorns' ? '#7fd65a' : '#f4f2ff', crit ? 2 : 1, e.id);
     if (crit && run.effects.quality) run.effects.burst(e.x, e.y - 6, ['#ffd36b', '#ff9a3c'], 5, 50, 0.25, 0);
 
     // Knockback and a short stagger (elites keep their poise).
@@ -74,7 +76,8 @@ export class Combat {
       }
     }
 
-    if (s.lifesteal > 0 && opts.source !== 'dot') p.heal(dmg * s.lifesteal);
+    // Lifesteal only from your own attacks (not thorns or DoTs), and capped per second.
+    if (s.lifesteal > 0 && opts.source !== 'dot' && opts.source !== 'thorns') p.lifestealHeal(dmg * s.lifesteal);
 
     if (!opts.noProc) {
       const wd = s.damage;
@@ -178,7 +181,7 @@ export class Combat {
     const dmg = Math.max(1, Math.round(amount));
     e.hp -= dmg;
     run.stats.damageDealt += dmg;
-    run.effects.number(e.x, e.y - 12, dmg, e.burnT > 0 ? '#ff9a3c' : '#e0384a', 1);
+    run.effects.number(e.x, e.y - 12, dmg, e.burnT > 0 ? '#ff9a3c' : '#e0384a', 1, e.id);
     if (e.hp <= 0) this.killEnemy(e);
   }
 
@@ -227,6 +230,16 @@ export class Combat {
     this.projectiles.push({ kind: 'shadow', x, y, vx: Math.cos(angle) * 150, vy: Math.sin(angle) * 150, angle, life: 0.75, dmg, radius: 8, hits: new Set() });
   }
 
+  fireArrow(e, dirX, dirY) {
+    const sp = e.def.projSpeed;
+    this.enemyProjectiles.push({ kind: 'arrow', x: e.x + dirX * 6, y: e.y - 7 + dirY * 6, vx: dirX * sp, vy: dirY * sp, life: 1.6, dmg: e.damage, radius: 3, source: e });
+  }
+
+  /** A delayed blast: telegraphed circle on the ground that detonates after `delay`. */
+  addRune(x, y, radius, delay, dmg, opts = {}) {
+    this.runes.push({ x, y, radius, delay, t: 0, dmg, source: opts.source || null, color: opts.color || 'purple', hitsEnemies: !!opts.hitsEnemies, kind: opts.kind || 'rune', name: opts.name || null });
+  }
+
   enemySlam(e, radius) {
     const run = this.run;
     const p = run.player;
@@ -239,6 +252,52 @@ export class Combat {
 
   update(dt) {
     const run = this.run;
+    const pl = run.player;
+    // Enemy arrows.
+    let ew = 0;
+    for (const pr of this.enemyProjectiles) {
+      pr.life -= dt;
+      pr.x += pr.vx * dt;
+      pr.y += pr.vy * dt;
+      if (pr.life <= 0 || run.map.isSolidAt(pr.x, pr.y + 6)) continue;
+      if (!pl.dead && (pl.x - pr.x) ** 2 + (pl.y - 6 - pr.y) ** 2 < (pl.radius + pr.radius) ** 2) {
+        if (pl.dashT <= 0) {
+          pl.takeDamage(pr.dmg, pr.source || null);
+          continue;
+        }
+      }
+      this.enemyProjectiles[ew++] = pr;
+    }
+    this.enemyProjectiles.length = ew;
+
+    // Runes and eruptions.
+    let rw = 0;
+    for (const r of this.runes) {
+      r.t += dt;
+      if (r.t < r.delay) {
+        this.runes[rw++] = r;
+        continue;
+      }
+      const lava = r.color === 'orange';
+      run.effects.ring(r.x, r.y, r.radius, lava ? '#ff9a3c' : '#b68cff', 0.35, 2);
+      run.effects.burst(r.x, r.y - 2, lava ? ['#ff9a3c', '#ffd36b', '#c2410c'] : ['#b68cff', '#7a3fc0', '#f4f2ff'], 14, 70, 0.45, lava ? 60 : 0);
+      run.hooks.sfx(lava ? 'explode' : 'runeBlast');
+      if (!pl.dead && (pl.x - r.x) ** 2 + (pl.y - r.y) ** 2 < (r.radius + pl.radius) ** 2) {
+        if (r.name) pl.takeDamage(r.dmg, null, r.name);
+        else pl.takeDamage(r.dmg, r.source || null);
+      }
+      if (r.hitsEnemies) {
+        for (const e of run.enemies) {
+          if (e.dead || (e.x - r.x) ** 2 + (e.y - r.y) ** 2 > (r.radius + e.radius) ** 2) continue;
+          e.hp -= r.dmg;
+          e.flash = 0.1;
+          run.effects.number(e.x, e.y - 12, Math.round(r.dmg), '#ff9a3c', 1);
+          if (e.hp <= 0) this.killEnemy(e);
+        }
+      }
+    }
+    this.runes.length = rw;
+
     // Projectiles.
     let w = 0;
     for (const pr of this.projectiles) {

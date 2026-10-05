@@ -106,6 +106,10 @@ export class Input {
       if (k === 'e' || k === 'l') this.edges.nova = true;
       if (k === 'q' || k === 'h') this.edges.potion = true;
       if ((k === 'escape' || k === 'p') && this.onPause) this.onPause();
+      if ((k === 'i' || k === 'tab') && this.onGear) {
+        e.preventDefault();
+        this.onGear();
+      }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
     window.addEventListener('blur', () => {

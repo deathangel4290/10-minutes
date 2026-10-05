@@ -8,6 +8,7 @@ import { bakeBackground, ellipse } from './background.js';
 import { drawText } from './font.js';
 import { RARITY_INFO } from '../data/rarities.js';
 import { clamp, lerp } from '../core/math.js';
+import { T } from '../game/map.js';
 
 const RARITY_GLOW = { common: null, uncommon: 'green', rare: 'blue', epic: 'purple', legendary: 'orange' };
 
@@ -54,7 +55,12 @@ export class Renderer {
 
   prepare(run) {
     if (this.bgFor !== run.map) {
-      this.bg = bakeBackground(run.map, this.S);
+      // The town never changes, so keep its baked ground between visits.
+      if (run.map.biome.id === 'town') {
+        this.townBg = this.townBg && this.townBgFor === run.map ? this.townBg : bakeBackground(run.map, this.S);
+        this.townBgFor = run.map;
+        this.bg = this.townBg;
+      } else this.bg = bakeBackground(run.map, this.S);
       this.bgFor = run.map;
       const p = run.player;
       this.cam.x = p.x - this.W / 2;
@@ -119,6 +125,7 @@ export class Renderer {
 
     ctx.save();
     ctx.translate(-cx, -cy);
+    this.drawLabels(run);
     this.drawNumbers(run);
     ctx.restore();
     this.drawEdgeArrows(run, cx, cy);
@@ -131,10 +138,36 @@ export class Renderer {
   drawGroundLayer(run) {
     const ctx = this.ctx;
     const S = this.S;
+    this.drawTerrainFx(run);
+    this.drawSpikes(run);
+    this.drawRunes(run);
+    // Player marker: a soft ring at the feet so you never lose yourself in a crowd.
+    const pl = run.player;
+    if (!pl.dead) {
+      ctx.globalAlpha = 0.35 + Math.sin(this.time * 4) * 0.1;
+      ctx.drawImage(S.glow.white, pl.x - 11, pl.y - 6, 22, 10);
+      ctx.globalAlpha = 1;
+    }
     // Telegraphs drawn on the ground.
     for (const e of run.enemies) {
       if (e.state !== 'windup' || !this.inView(e.x, e.y)) continue;
-      if (e.def.behavior === 'lunger') {
+      if (e.def.behavior === 'melee') {
+        // A red wedge shows exactly where the swing will land.
+        const prog = 1 - e.timer / e.def.windup;
+        const reach = e.def.attackRange + 8;
+        const a = Math.atan2(run.player.y - e.y, run.player.x - e.x);
+        ctx.fillStyle = `rgba(224, 56, 74, ${0.18 + prog * 0.35})`;
+        ctx.beginPath();
+        ctx.moveTo(e.x, e.y - 3);
+        ctx.arc(e.x, e.y - 3, reach * (0.4 + prog * 0.6), a - 0.8, a + 0.8);
+        ctx.closePath();
+        ctx.fill();
+      } else if (e.def.behavior === 'archer') {
+        // Aim line: where the arrow will fly.
+        const prog = 1 - e.timer / e.def.windup;
+        ctx.fillStyle = `rgba(255, 90, 90, ${0.3 + prog * 0.5})`;
+        for (let i = 8; i < e.def.range; i += 4) ctx.fillRect(Math.round(e.x + e.aimX * i), Math.round(e.y - 7 + e.aimY * i), 1, 1);
+      } else if (e.def.behavior === 'lunger') {
         const len = e.def.lungeSpeed * e.def.lungeTime;
         const prog = 1 - e.timer / e.def.lungeWindup;
         ctx.fillStyle = `rgba(224, 56, 74, ${0.25 + prog * 0.45})`;
@@ -159,12 +192,100 @@ export class Renderer {
     }
     // Gate ground glow.
     for (const poi of run.pois) {
-      if (poi.type !== 'gate' || !this.inView(poi.x, poi.y)) continue;
+      if ((poi.type !== 'gate' && poi.type !== 'portal') || !this.inView(poi.x, poi.y)) continue;
       if (poi.open) {
         const pulse = 0.5 + Math.sin(this.time * 3) * 0.2;
         ctx.globalAlpha = pulse;
         ctx.drawImage(S.glow.purple, poi.x - 24, poi.y - 10, 48, 20);
         ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  /** Animated terrain: bubbling lava, glinting ice, region weather. */
+  drawTerrainFx(run) {
+    const ctx = this.ctx;
+    const map = run.map;
+    const x0 = Math.max(0, Math.floor(this.cx / TILE));
+    const y0 = Math.max(0, Math.floor(this.cy / TILE));
+    const x1 = Math.min(map.n - 1, Math.floor((this.cx + this.W) / TILE));
+    const y1 = Math.min(map.n - 1, Math.floor((this.cy + this.H) / TILE));
+    const pal = map.biome.palette;
+    if (pal === 'ash' || pal === 'snow') {
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          const t = map.tiles[ty * map.n + tx];
+          if (t === T.LAVA) {
+            const k = Math.sin(this.time * 2 + tx * 1.3 + ty * 0.7);
+            if (k > 0.6) {
+              ctx.fillStyle = k > 0.9 ? '#ffd36b' : '#ff9a3c';
+              ctx.fillRect(tx * TILE + ((tx * 7 + ty * 3) % 13), ty * TILE + ((tx * 5 + ty * 11) % 13), 2, 1);
+            }
+            if (Math.random() < 0.003) run.effects.particle(tx * TILE + Math.random() * 16, ty * TILE + Math.random() * 16, 0, -14, 0.8, '#ff9a3c', 1, -6, 0.5);
+          } else if (t === T.ICE && Math.sin(this.time * 1.5 + tx * 2.1 + ty) > 0.97) {
+            ctx.fillStyle = '#e8f6ff';
+            ctx.fillRect(tx * TILE + 5, ty * TILE + 6, 3, 1);
+          }
+        }
+      }
+    }
+    // Weather / ambient particles.
+    const kind = map.biome.particles;
+    if (kind && this.quality) {
+      const rx = this.cx + Math.random() * this.W;
+      const ry = this.cy + Math.random() * this.H;
+      if (kind === 'snow' && Math.random() < 0.9) run.effects.particle(rx, this.cy - 4, -8 + Math.random() * 4, 22 + Math.random() * 10, 6, Math.random() < 0.7 ? '#e8eef8' : '#aeb9cf', 1, 0, 0);
+      else if (kind === 'ash' && Math.random() < 0.5) run.effects.particle(rx, ry, 4, -8, 3, Math.random() < 0.3 ? '#ff9a3c' : '#5a4a48', 1, -1, 0.2);
+      else if (kind === 'fireflies' && Math.random() < 0.06) run.effects.particle(rx, ry, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, 2.5, '#d7f06a', 1, 0, 0.1);
+      else if (kind === 'dust' && Math.random() < 0.15) run.effects.particle(rx, ry, 2, 1, 3, '#4a4560', 1, 0, 0.1);
+    }
+  }
+
+  drawSpikes(run) {
+    const ctx = this.ctx;
+    for (const s of run.map.spikes) {
+      if (!this.inView(s.x, s.y, 20)) continue;
+      const x = s.tx * TILE;
+      const y = s.ty * TILE;
+      ctx.fillStyle = '#1a1826';
+      ctx.fillRect(x + 1, y + 1, 14, 14);
+      for (let k = 0; k < 9; k++) {
+        const sx = x + 3 + (k % 3) * 5;
+        const sy = y + 3 + Math.floor(k / 3) * 5;
+        if (s.state === 'up') {
+          ctx.fillStyle = '#c9c6dc';
+          ctx.fillRect(sx, sy - 3, 1, 4);
+          ctx.fillStyle = '#e0384a';
+          ctx.fillRect(sx, sy - 3, 1, 1);
+        } else if (s.state === 'warn') {
+          ctx.fillStyle = Math.floor(this.time * 12) % 2 ? '#ff5a5a' : '#8a84a6';
+          ctx.fillRect(sx, sy - 1, 1, 2);
+        } else {
+          ctx.fillStyle = '#07060c';
+          ctx.fillRect(sx, sy, 1, 1);
+        }
+      }
+    }
+  }
+
+  /** Delayed blasts: the ring shows the area, the fill shows the fuse. */
+  drawRunes(run) {
+    const ctx = this.ctx;
+    for (const r of run.combat.runes) {
+      if (!this.inView(r.x, r.y, r.radius + 4)) continue;
+      const prog = Math.min(1, r.t / r.delay);
+      const lava = r.color === 'orange';
+      const rgb = lava ? '255,120,40' : '196,140,255';
+      ctx.fillStyle = `rgba(${rgb},${0.12 + prog * 0.28})`;
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y, r.radius * prog, r.radius * 0.7 * prog, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = lava ? '#ff9a3c' : '#c48cff';
+      const n = Math.round(r.radius * 2);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + (lava ? 0 : this.time);
+        if (!lava && i % 4 === 3) continue;
+        ctx.fillRect(Math.round(r.x + Math.cos(a) * r.radius), Math.round(r.y + Math.sin(a) * r.radius * 0.7), 1, 1);
       }
     }
   }
@@ -209,11 +330,12 @@ export class Renderer {
   drawProp(pr, player) {
     const S = this.S;
     let img;
-    if (pr.kind === 'pine') img = S.pines[pr.variant % S.pines.length];
-    else if (pr.kind === 'round') img = S.roundTrees[pr.variant % S.roundTrees.length];
-    else if (pr.kind === 'dead') img = S.deadTrees[pr.variant % S.deadTrees.length];
+    const set = S.props[pr.kind];
+    if (set) img = set[pr.variant % set.length];
     else if (pr.kind === 'pillar') img = S.pillar;
-    else img = S.pillarBroken;
+    else if (pr.kind === 'pillarBroken') img = S.pillarBroken;
+    else if (S.buildings && S.buildings[pr.kind]) img = S.buildings[pr.kind];
+    else return;
     const x = Math.round(pr.x - img.width / 2);
     const y = Math.round(pr.y - img.height + 1);
     // Canopies in front of the player turn see-through so the hero is never lost.
@@ -285,7 +407,18 @@ export class Renderer {
         break;
       }
       case 'gate':
+      case 'portal':
         this.drawGate(run, poi, x, y);
+        break;
+      case 'vendor': {
+        const npc = S.npc[poi.shop] || S.merchant;
+        ctx.drawImage(this.shadow(6), x - 7, y - 3);
+        const facing = run.player.x < x ? npc.l : npc.r;
+        ctx.drawImage(facing, x - 8, y - 15 + (Math.floor(this.time * 2 + x) % 2));
+        break;
+      }
+      case 'board':
+        ctx.drawImage(S.noticeBoard, x - 9, y - 18);
         break;
       case 'camp': {
         // Campfire.
@@ -345,12 +478,7 @@ export class Renderer {
     const ctx = this.ctx;
     const S = this.S;
     const scale = e.def.scale || 1;
-    let frames;
-    if (e.champion) frames = S.champion;
-    else if (e.def.sprite === 'skeleton') frames = e.elite ? S.skeletonElite : S.skeleton;
-    else if (e.def.sprite === 'slime') frames = e.elite ? S.slimeElite : S.slime;
-    else if (e.def.sprite === 'slimeling') frames = e.elite ? S.slimelingElite : S.slimeling;
-    else frames = e.elite ? S.wolfElite : S.wolf;
+    const frames = S.enemyFrames(e.def.sprite, e.champion ? 'champion' : run.biome.skin, e.elite && !e.champion);
 
     let fi = Math.floor(e.animT * 5) % 2;
     if (e.state === 'windup' && frames.length > 2) fi = 2;
@@ -432,7 +560,7 @@ export class Renderer {
       ctx.drawImage(this.shadow(4), x - 5, Math.round(pk.y) - 3);
       let img;
       if (item.kind === 'weapon') img = S.weaponIcons[`${item.type}|${item.rarity}`];
-      else if (item.kind === 'relic') img = S.icon(item.icon, item.rarity);
+      else if (item.kind === 'relic' || item.kind === 'armor') img = S.icon(item.icon, item.rarity);
       else img = S.potion;
       ctx.drawImage(img, x - Math.floor(img.width / 2), y - img.height - 2 + bob);
     }
@@ -445,7 +573,7 @@ export class Renderer {
     const y = Math.round(p.y);
     if (p.dead && run.ended && run.result && run.result.outcome === 'escaped') return;
     ctx.drawImage(this.shadow(5), x - 6, y - 3);
-    const b = S[p.currentSpriteName()];
+    const b = S.playerSprites(p.gear)[p.currentSpriteName()];
     const blink = p.iframes > 0 && p.dashT <= 0 && Math.floor(this.time * 20) % 2 === 0;
     const flash = p.hurtFlash > 0;
     const img = flash ? (p.facing < 0 ? b.flashL : b.flashR) : p.facing < 0 ? b.l : b.r;
@@ -459,6 +587,19 @@ export class Renderer {
     ctx.drawImage(img, x - 8, y - 15 + bob);
     ctx.globalAlpha = 1;
 
+    // Overhead HP bar when hurt, so you can read your health without looking away.
+    const hpPct = p.hp / p.stats.maxHp;
+    if (hpPct < 0.999 && !p.dead) {
+      ctx.fillStyle = '#07060c';
+      ctx.fillRect(x - 8, y - 21, 16, 3);
+      ctx.fillStyle = hpPct < 0.3 ? (Math.floor(this.time * 6) % 2 ? '#ff5a5a' : '#8e1f2c') : '#e0384a';
+      ctx.fillRect(x - 7, y - 20, Math.max(1, Math.round(14 * hpPct)), 1);
+    }
+    if (run.frost > 2) {
+      ctx.globalAlpha = Math.min(0.6, (run.frost - 2) * 0.25);
+      ctx.drawImage(S.glow.blue, x - 12, y - 20, 24, 24);
+      ctx.globalAlpha = 1;
+    }
     // Weapon.
     const wpn = S.weapons[p.weapon.sprite][p.weapon.rarity];
     const hx = p.facing > 0 ? x - 8 + PLAYER_HAND.x : x + 8 - PLAYER_HAND.x - 1;
@@ -535,6 +676,17 @@ export class Renderer {
       }
       ctx.globalAlpha = 1;
     }
+    // Enemy arrows.
+    for (const pr of run.combat.enemyProjectiles) {
+      const len = 6;
+      const l = Math.hypot(pr.vx, pr.vy) || 1;
+      const dx = pr.vx / l;
+      const dy = pr.vy / l;
+      ctx.fillStyle = '#d9d2bf';
+      for (let i = 0; i < len; i++) ctx.fillRect(Math.round(pr.x - dx * i), Math.round(pr.y - dy * i), 1, 1);
+      ctx.fillStyle = '#ff5a5a';
+      ctx.fillRect(Math.round(pr.x), Math.round(pr.y), 1, 1);
+    }
     // Shadow-wave projectiles.
     for (const pr of run.combat.projectiles) {
       ctx.fillStyle = '#b68cff';
@@ -595,7 +747,7 @@ export class Renderer {
     const W = this.W;
     const H = this.H;
     const p = run.player;
-    let dark = run.phase.darkness;
+    let dark = run.phase.darkness + (run.biome ? run.biome.darkness : 0);
     if (run.timeLeft <= 60) dark += 0.06 + Math.sin(this.time * 4) * 0.03;
     lctx.globalCompositeOperation = 'source-over';
     lctx.clearRect(0, 0, W, H);
@@ -613,7 +765,8 @@ export class Renderer {
     light(p.x, p.y - 6, p.stats.lightRadius * (run.timeLeft <= 60 ? 0.9 : 1), 1);
     for (const t of run.map.torches) light(t.x, t.y - 8, 34 * flick, 0.9);
     for (const poi of run.pois) {
-      if (poi.type === 'gate' && poi.open) light(poi.x, poi.y - 12, 46, 1);
+      if ((poi.type === 'gate' || poi.type === 'portal') && poi.open) light(poi.x, poi.y - 12, 46, 1);
+      else if (poi.type === 'vendor') light(poi.x, poi.y - 8, 30, 0.8);
       else if (poi.type === 'merchant') light(poi.x, poi.y - 8, 34, 0.9);
       else if (poi.type === 'camp') light(poi.x, poi.y, 40 * flick, 1);
       else if (poi.type === 'chest' && !poi.opened && RARITY_INFO[poi.rarity].tier >= 2) light(poi.x, poi.y - 6, 20, 0.6);
@@ -621,6 +774,16 @@ export class Renderer {
       else if (poi.type === 'mystery' && !poi.used) light(poi.x, poi.y - 6, 22, 0.7);
     }
     for (const bm of run.effects.beams) light(bm.x, bm.y - 20, 30, bm.life / bm.max);
+    for (const r of run.combat.runes) light(r.x, r.y, r.radius + 8, 0.5 + 0.5 * Math.min(1, r.t / r.delay));
+    if (run.map.biome.palette === 'ash') {
+      const map = run.map;
+      const x0 = Math.max(0, Math.floor(cx / TILE) - 1);
+      const y0 = Math.max(0, Math.floor(cy / TILE) - 1);
+      const x1 = Math.min(map.n - 1, Math.floor((cx + W) / TILE) + 1);
+      const y1 = Math.min(map.n - 1, Math.floor((cy + H) / TILE) + 1);
+      for (let ty = y0; ty <= y1; ty += 2)
+        for (let tx = x0; tx <= x1; tx += 2) if (map.tiles[ty * map.n + tx] === T.LAVA) light(tx * TILE + 8, ty * TILE + 8, 26, 0.35);
+    }
     for (const r of run.effects.rings) light(r.x, r.y, r.radius, (r.life / r.max) * 0.8);
     for (const pr of run.combat.projectiles) light(pr.x, pr.y, 16, 0.6);
     lctx.globalAlpha = 1;
@@ -638,7 +801,7 @@ export class Renderer {
     }
     ctx.globalAlpha = 0.25;
     for (const poi of run.pois) {
-      if (poi.type === 'gate' && poi.open) ctx.drawImage(S.glow.purple, poi.x - cx - 26, poi.y - cy - 40, 52, 52);
+      if ((poi.type === 'gate' || poi.type === 'portal') && poi.open) ctx.drawImage(S.glow.purple, poi.x - cx - 26, poi.y - cy - 40, 52, 52);
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
@@ -655,6 +818,58 @@ export class Renderer {
       v.fillRect(0, 0, this.W, this.H);
     }
     this.ctx.drawImage(this.vignette, 0, 0);
+  }
+
+  /** Name tags on nearby points of interest so it's clear what everything is. */
+  drawLabels(run) {
+    const ctx = this.ctx;
+    const p = run.player;
+    const range = run.biome && run.biome.id === 'town' ? 400 : 95;
+    for (const poi of run.pois) {
+      if (!poi.discovered) continue;
+      const d2 = (poi.x - p.x) ** 2 + (poi.y - p.y) ** 2;
+      if (d2 > range * range) continue;
+      let label = null;
+      let color = '#c9c6dc';
+      let lift = 20;
+      if (poi.type === 'gate') {
+        label = poi.open ? 'RIFT GATE' : 'COLLAPSED';
+        color = poi.open ? '#d7b8ff' : '#6d6588';
+        lift = 36;
+      } else if (poi.type === 'chest' && !poi.opened) {
+        label = poi.cursed ? 'CURSED CHEST' : poi.treasure ? 'TREASURE' : 'CHEST';
+        color = RARITY_INFO[poi.rarity].color;
+        lift = 20;
+      } else if (poi.type === 'shrine' && !poi.used) {
+        label = 'SHRINE';
+        color = '#ff9a9a';
+        lift = 26;
+      } else if (poi.type === 'mystery' && !poi.used) {
+        label = 'MYSTERY';
+        color = '#d7a8ff';
+        lift = 30;
+      } else if (poi.type === 'merchant') {
+        label = 'MERCHANT';
+        color = '#ffd36b';
+        lift = 32;
+      } else if (poi.type === 'vendor') {
+        label = poi.label;
+        color = poi.color || '#ffd36b';
+        lift = 30;
+      } else if (poi.type === 'board') {
+        label = 'RECORDS';
+        color = '#c9c6dc';
+        lift = 24;
+      } else if (poi.type === 'portal') {
+        label = 'RIFT PORTAL';
+        color = '#d7b8ff';
+        lift = 40;
+      }
+      if (!label) continue;
+      ctx.globalAlpha = range < 100 && d2 > 70 * 70 ? 0.55 : 1;
+      drawText(ctx, label, Math.round(poi.x), Math.round(poi.y - lift), color);
+    }
+    ctx.globalAlpha = 1;
   }
 
   drawNumbers(run) {

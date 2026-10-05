@@ -225,7 +225,7 @@ export class Events {
       run.collectItem(makePotion());
       s.sold = false; // potions stay in stock
     } else if (s.kind === 'blessing') {
-      pl.heal(pl.stats.maxHp);
+      pl.heal(pl.stats.maxHp, true);
       run.effects.burst(pl.x, pl.y - 6, ['#7fd65a', '#f4f2ff'], 14, 50, 0.6, -20);
     } else if (s.item) {
       run.collectItem(s.item, { bought: true });

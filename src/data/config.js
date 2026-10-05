@@ -2,7 +2,6 @@
 // changed without touching systems code.
 
 export const TILE = 16;
-export const MAP_TILES = 80; // map is MAP_TILES x MAP_TILES tiles
 export const RUN_DURATION = 600; // seconds — the "10 minutes"
 
 // Target logical (game-pixel) width of the view in portrait. The canvas is
@@ -22,46 +21,50 @@ export const PHASES = [
     eliteChance: 0,
     itemLevel: 1,
     mix: { skeleton: 5, slime: 4, wolf: 1 },
-    darkness: 0.38,
+    darkness: 0.3,
+    healMult: 1,
     musicIntensity: 0,
   },
   {
     id: 1,
     until: 300,
     name: 'MEDIUM DANGER',
-    banner: { title: 'THE AIR GROWS COLD', sub: 'Stronger enemies stir. Better loot awaits.' },
+    banner: { title: 'THE AIR GROWS COLD', sub: 'Archers join the hunt. Better loot awaits.' },
     spawnRate: [0.9, 1.4],
     maxAlive: 40,
     eliteChance: 0.015,
     itemLevel: 2,
-    mix: { skeleton: 5, slime: 3, wolf: 3 },
-    darkness: 0.46,
+    mix: { skeleton: 5, slime: 3, wolf: 3, archer: 1 },
+    darkness: 0.36,
+    healMult: 0.9,
     musicIntensity: 1,
   },
   {
     id: 2,
     until: 120,
     name: 'HIGH DANGER',
-    banner: { title: 'THE ECLIPSE STIRS', sub: 'Elites hunt. Events grow common.' },
+    banner: { title: 'THE ECLIPSE STIRS', sub: 'Mages and elites hunt. Healing weakens.' },
     spawnRate: [1.5, 2.2],
     maxAlive: 60,
     eliteChance: 0.025,
     itemLevel: 3,
-    mix: { skeleton: 5, slime: 3, wolf: 4 },
-    darkness: 0.54,
+    mix: { skeleton: 5, slime: 3, wolf: 4, archer: 2, mage: 1.3 },
+    darkness: 0.42,
+    healMult: 0.75,
     musicIntensity: 2,
   },
   {
     id: 3,
     until: -1,
     name: 'EXTREME DANGER',
-    banner: { title: 'FINAL MINUTES', sub: 'Rare loot. Deadly foes. Reach a gate.' },
+    banner: { title: 'FINAL MINUTES', sub: 'Rare loot. Deadly foes. Healing is weak. Reach a gate.' },
     spawnRate: [2.6, 4.2],
     maxAlive: 95,
     eliteChance: 0.05,
     itemLevel: 4,
-    mix: { skeleton: 4, slime: 3, wolf: 5 },
-    darkness: 0.6,
+    mix: { skeleton: 4, slime: 3, wolf: 5, archer: 2.5, mage: 2.2 },
+    darkness: 0.48,
+    healMult: 0.6,
     musicIntensity: 3,
   },
 ];

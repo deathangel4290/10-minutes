@@ -1,34 +1,48 @@
 // Procedural map generation, tile collision and the enemy flow field.
-// DOM-free so it can be unit tested in Node.
+// DOM-free so it can be unit tested in Node. Each region (biome) shapes
+// the generator: map size, layout, terrain, pools of ice or lava, trees.
 
-import { TILE, MAP_TILES, GATE_CLOSE_TIMES } from '../data/config.js';
+import { TILE, GATE_CLOSE_TIMES } from '../data/config.js';
+import { BIOMES } from '../data/biomes.js';
 import { RNG } from '../core/rng.js';
 import { makeFractalNoise, makeNoise } from '../core/noise.js';
 import { TAU, clamp } from '../core/math.js';
 
-export const T = { GRASS: 0, DARK: 1, DIRT: 2, STONE: 3, WALL: 4, TREE: 5, BORDER: 6, PILLAR: 7 };
-const SOLID = [false, false, false, false, true, true, true, true];
+export const T = { GRASS: 0, DARK: 1, DIRT: 2, STONE: 3, WALL: 4, TREE: 5, BORDER: 6, PILLAR: 7, ICE: 8, LAVA: 9, COBBLE: 10 };
+const SOLID = [false, false, false, false, true, true, true, true, false, false, false];
 
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
 export class GameMap {
-  constructor(seed) {
+  /**
+   * @param {number} seed
+   * @param {object} [biome] entry from BIOMES (defaults to the forest)
+   * @param {{custom?: (map: GameMap, rng: RNG) => void}} [opts] custom builder (used by the town)
+   */
+  constructor(seed, biome = BIOMES.forest, opts = {}) {
     this.seed = seed;
-    this.n = MAP_TILES;
-    this.size = MAP_TILES * TILE;
+    this.biome = biome;
+    this.n = opts.size || biome.size;
+    this.size = this.n * TILE;
     this.tiles = new Uint8Array(this.n * this.n);
     this.reach = new Uint8Array(this.n * this.n);
     this.flow = new Uint16Array(this.n * this.n);
     this.flowQueue = new Int32Array(this.n * this.n);
     this.flowOrigin = -1;
-    this.props = []; // y-sorted drawables: { kind, img, x, y }
+    this.props = []; // y-sorted drawables
     this.propRows = [];
     this.decor = []; // flat decorations baked into the ground
     this.torches = [];
     this.pois = [];
     this.cursedZones = [];
-    this.generate(new RNG(seed));
+    this.spikes = [];
+    this.floorTile = biome.layout === 'rooms' ? T.STONE : T.DIRT;
+    const rng = new RNG(seed);
+    if (opts.custom) opts.custom(this, rng);
+    else if (biome.layout === 'rooms') this.generateRooms(rng);
+    else this.generateWilds(rng);
+    this.finish(rng, !opts.custom);
   }
 
   idx(tx, ty) {
@@ -41,6 +55,10 @@ export class GameMap {
 
   tile(tx, ty) {
     return this.inBounds(tx, ty) ? this.tiles[this.idx(tx, ty)] : T.BORDER;
+  }
+
+  tileAt(px, py) {
+    return this.tile(Math.floor(px / TILE), Math.floor(py / TILE));
   }
 
   isSolid(tx, ty) {
@@ -57,54 +75,50 @@ export class GameMap {
     return this.inBounds(tx, ty) && !this.isSolid(tx, ty) && this.reach[this.idx(tx, ty)] === 1;
   }
 
-  // ── Generation ─────────────────────────────────────────────
-  generate(rng) {
+  /** Reachable, walkable and not a hazard (for spawning things). */
+  isSafeOpen(px, py) {
+    const t = this.tileAt(px, py);
+    return this.isOpenReachable(px, py) && t !== T.LAVA;
+  }
+
+  markClear(clear, tx, ty, r) {
+    for (let y = ty - r; y <= ty + r; y++)
+      for (let x = tx - r; x <= tx + r; x++)
+        if (this.inBounds(x, y) && (x - tx) ** 2 + (y - ty) ** 2 <= r * r + r) clear[this.idx(x, y)] = 1;
+  }
+
+  // ── Open-world layout (forest, tundra, caldera) ───────────
+  generateWilds(rng) {
     const N = this.n;
     const tiles = this.tiles;
+    const g = this.biome.gen;
     const clear = new Uint8Array(N * N); // tiles that must stay walkable
-    const forestN = makeFractalNoise(rng.fork(), 5, 3);
-    const darkN = makeFractalNoise(rng.fork(), 7, 2);
-    const ruinN = makeFractalNoise(rng.fork(), 4, 2);
+    const forestN = makeFractalNoise(rng.fork(), Math.round(N / 16), 3);
+    const darkN = makeFractalNoise(rng.fork(), Math.round(N / 11), 2);
+    const ruinN = makeFractalNoise(rng.fork(), Math.round(N / 20), 2);
+    const poolN = makeFractalNoise(rng.fork(), Math.round(N / 14), 3);
     const borderN = makeNoise(rng.fork(), 14);
     const cx = Math.floor(N / 2);
     const cy = Math.floor(N / 2);
+    this.center = { tx: cx, ty: cy };
     this.spawn = { x: cx * TILE + TILE / 2, y: cy * TILE + TILE / 2 };
-
-    const markClear = (tx, ty, r) => {
-      for (let y = ty - r; y <= ty + r; y++)
-        for (let x = tx - r; x <= tx + r; x++)
-          if (this.inBounds(x, y) && (x - tx) ** 2 + (y - ty) ** 2 <= r * r + r) clear[this.idx(x, y)] = 1;
-    };
-    markClear(cx, cy, 4);
+    this.markClear(clear, cx, cy, 4);
 
     // Rift gates spread around the center.
-    const closeTimes = rng.shuffle([...GATE_CLOSE_TIMES]);
-    const base = rng.range(0, TAU);
-    const gates = [];
-    for (let i = 0; i < 3; i++) {
-      const a = base + (i * TAU) / 3 + rng.range(-0.35, 0.35);
-      const d = rng.range(27, 32);
-      const tx = clamp(Math.round(cx + Math.cos(a) * d), 6, N - 7);
-      const ty = clamp(Math.round(cy + Math.sin(a) * d), 6, N - 7);
-      gates.push({ tx, ty });
-      markClear(tx, ty, 3);
-      this.pois.push({ type: 'gate', id: `gate${i}`, x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2, closesAt: closeTimes[i], open: true, radius: 12 });
-    }
+    const gates = this.placeGates(rng, cx, cy, N * 0.34, N * 0.4, clear);
 
     // Candidate POI spots (dart throwing with spacing).
+    const area = (N / 80) ** 2;
     const spots = [];
-    for (let attempt = 0; attempt < 4000 && spots.length < 34; attempt++) {
+    for (let attempt = 0; attempt < 6000 && spots.length < Math.round(34 * area); attempt++) {
       const tx = rng.int(7, N - 8);
       const ty = rng.int(7, N - 8);
       if ((tx - cx) ** 2 + (ty - cy) ** 2 < 8 * 8) continue;
-      if (gates.some((g) => (g.tx - tx) ** 2 + (g.ty - ty) ** 2 < 7 * 7)) continue;
+      if (gates.some((gt) => (gt.tx - tx) ** 2 + (gt.ty - ty) ** 2 < 7 * 7)) continue;
       if (spots.some((s) => (s.tx - tx) ** 2 + (s.ty - ty) ** 2 < 8 * 8)) continue;
       spots.push({ tx, ty });
     }
     rng.shuffle(spots);
-    const take = () => spots.pop();
-    const px = (s) => s.tx * TILE + TILE / 2;
-    const py = (s) => s.ty * TILE + TILE / 2;
 
     // Treasure room: walled ruin, heavily guarded, great chest inside.
     const roomSpot = spots.find((s) => s.tx > 12 && s.tx < N - 13 && s.ty > 12 && s.ty < N - 13);
@@ -112,52 +126,11 @@ export class GameMap {
       spots.splice(spots.indexOf(roomSpot), 1);
       this.buildTreasureRoom(rng, roomSpot.tx, roomSpot.ty, clear);
     }
-
-    const cursed = take();
-    if (cursed) {
-      markClear(cursed.tx, cursed.ty, 2);
-      const zone = { x: px(cursed), y: py(cursed), r: 88 };
-      this.cursedZones.push(zone);
-      this.pois.push({ type: 'chest', x: zone.x, y: zone.y, rarity: 'epic', cursed: true, opened: false, radius: 10 });
-    }
-    for (let i = 0; i < 3; i++) {
-      const s = take();
-      if (!s) break;
-      markClear(s.tx, s.ty, 2);
-      this.pois.push({ type: 'camp', x: px(s), y: py(s), spawned: false, radius: 0 });
-      this.pois.push({ type: 'chest', x: px(s), y: py(s) - 4, rarity: rng.chance(0.4) ? 'rare' : 'uncommon', opened: false, radius: 10 });
-      this.torches.push({ x: px(s) - 18, y: py(s) + 6 }, { x: px(s) + 18, y: py(s) + 6 });
-    }
-    const shrineKinds = rng.shuffle(['blood', 'greed', 'fortune', 'haste']);
-    for (let i = 0; i < 3; i++) {
-      const s = take();
-      if (!s) break;
-      markClear(s.tx, s.ty, 2);
-      this.pois.push({ type: 'shrine', kind: shrineKinds[i], x: px(s), y: py(s), used: false, radius: 12 });
-    }
-    for (let i = 0; i < 3; i++) {
-      const s = take();
-      if (!s) break;
-      markClear(s.tx, s.ty, 2);
-      this.pois.push({ type: 'mystery', x: px(s), y: py(s), used: false, radius: 11 });
-    }
-    for (let i = 0; i < 2; i++) {
-      const s = take();
-      if (!s) break;
-      markClear(s.tx, s.ty, 3);
-      this.pois.push({ type: 'ambush', x: px(s), y: py(s), triggered: false, radius: 22 });
-      // Subtle warning signs: scattered bones.
-      for (let k = 0; k < 4; k++) this.decor.push({ kind: 'bones', x: px(s) + rng.range(-20, 20), y: py(s) + rng.range(-16, 16) });
-    }
-    while (spots.length > 0 && this.pois.filter((p) => p.type === 'chest').length < 14) {
-      const s = take();
-      markClear(s.tx, s.ty, 1);
-      this.pois.push({ type: 'chest', x: px(s), y: py(s), rarity: rng.chance(0.18) ? 'uncommon' : 'common', opened: false, radius: 10 });
-    }
+    this.placePois(rng, spots, clear, area);
 
     // Dirt paths from the center to each gate and to a few points of interest.
-    for (const g of gates) this.carvePath(rng, cx, cy, g.tx, g.ty, clear);
-    const someTargets = rng.shuffle(this.pois.filter((p) => p.type !== 'gate')).slice(0, 4);
+    for (const gt of gates) this.carvePath(rng, cx, cy, gt.tx, gt.ty, clear);
+    const someTargets = rng.shuffle(this.pois.filter((p) => p.type !== 'gate')).slice(0, Math.round(4 * area));
     for (const p of someTargets) this.carvePath(rng, cx, cy, Math.floor(p.x / TILE), Math.floor(p.y / TILE), clear);
 
     // Terrain pass.
@@ -173,23 +146,26 @@ export class GameMap {
         }
         if (tiles[i] !== T.GRASS) continue; // already a path / ruin
         if (clear[i]) continue;
-        const nearSpawn = (tx - cx) ** 2 + (ty - cy) ** 2 < 6 * 6;
-        const ruin = ruinN(u, v);
-        if (ruin > 0.66 && !nearSpawn) {
+        const nearSpawn = (tx - cx) ** 2 + (ty - cy) ** 2 < 7 * 7;
+        if (g.pools && !nearSpawn && poolN(u, v) > g.pools.threshold) {
+          tiles[i] = g.pools.tile === 'lava' ? T.LAVA : T.ICE;
+          continue;
+        }
+        if (ruinN(u, v) > g.ruins && !nearSpawn) {
           tiles[i] = T.STONE;
           continue;
         }
         const f = forestN(u, v);
-        if (!nearSpawn && ((f > 0.57 && rng.chance(0.86)) || rng.chance(0.022))) {
+        if (!nearSpawn && ((f > g.forest && rng.chance(g.forestChance)) || rng.chance(g.scatter))) {
           tiles[i] = T.TREE;
           continue;
         }
-        if (darkN(u, v) > 0.56) tiles[i] = T.DARK;
+        if (darkN(u, v) > g.dark) tiles[i] = T.DARK;
       }
     }
 
     // Broken walls and pillars on ruin patches.
-    for (let k = 0; k < 220; k++) {
+    for (let k = 0; k < Math.round(220 * area); k++) {
       const tx = rng.int(4, N - 5);
       const ty = rng.int(4, N - 5);
       if (tiles[this.idx(tx, ty)] !== T.STONE) continue;
@@ -208,21 +184,224 @@ export class GameMap {
       }
       if (rng.chance(0.5)) this.decor.push({ kind: 'grave', x: tx * TILE + rng.range(2, 14), y: ty * TILE + 16 + rng.range(4, 12) });
     }
+  }
 
-    this.ensureConnectivity(cx, cy);
+  // ── Dungeon layout (crypt): rooms joined by corridors ─────
+  generateRooms(rng) {
+    const N = this.n;
+    const tiles = this.tiles;
+    tiles.fill(T.WALL);
+    for (let ty = 0; ty < N; ty++)
+      for (let tx = 0; tx < N; tx++) if (Math.min(tx, ty, N - 1 - tx, N - 1 - ty) < 2) tiles[this.idx(tx, ty)] = T.BORDER;
+    const clear = new Uint8Array(N * N);
+    const cx = Math.floor(N / 2);
+    const cy = Math.floor(N / 2);
+    this.center = { tx: cx, ty: cy };
+    this.spawn = { x: cx * TILE + TILE / 2, y: cy * TILE + TILE / 2 };
+
+    const rooms = [{ x: cx - 4, y: cy - 4, w: 9, h: 9, start: true }];
+    const overlaps = (r) => rooms.some((o) => r.x < o.x + o.w + 3 && r.x + r.w + 3 > o.x && r.y < o.y + o.h + 3 && r.y + r.h + 3 > o.y);
+    for (let attempt = 0; attempt < 900 && rooms.length < 34; attempt++) {
+      const w = rng.int(6, 13);
+      const h = rng.int(6, 11);
+      const r = { x: rng.int(4, N - w - 5), y: rng.int(4, N - h - 5), w, h };
+      if (!overlaps(r)) rooms.push(r);
+    }
+    const carveRect = (x0, y0, w, h) => {
+      for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (this.inBounds(x, y) && tiles[this.idx(x, y)] !== T.BORDER) tiles[this.idx(x, y)] = T.STONE;
+    };
+    for (const r of rooms) carveRect(r.x, r.y, r.w, r.h);
+    // Connect every room to its nearest already-connected room (a spanning tree), plus a few loops.
+    const centerOf = (r) => ({ x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor(r.h / 2) });
+    const connected = [rooms[0]];
+    const corridor = (a, b) => {
+      const ca = centerOf(a);
+      const cb = centerOf(b);
+      const horizFirst = rng.chance(0.5);
+      const wdt = rng.chance(0.3) ? 3 : 2;
+      const hLine = (y, x0, x1) => carveRect(Math.min(x0, x1), y, Math.abs(x1 - x0) + wdt, wdt);
+      const vLine = (x, y0, y1) => carveRect(x, Math.min(y0, y1), wdt, Math.abs(y1 - y0) + wdt);
+      if (horizFirst) {
+        hLine(ca.y, ca.x, cb.x);
+        vLine(cb.x, ca.y, cb.y);
+      } else {
+        vLine(ca.x, ca.y, cb.y);
+        hLine(cb.y, ca.x, cb.x);
+      }
+      // Spike traps in some corridors.
+      if (rng.chance(0.45)) {
+        const mx = horizFirst ? Math.round((ca.x + cb.x) / 2) : ca.x;
+        const my = horizFirst ? ca.y : Math.round((ca.y + cb.y) / 2);
+        for (let k = 0; k < wdt; k++) {
+          const sx = horizFirst ? mx : mx + k;
+          const sy = horizFirst ? my + k : my;
+          this.spikes.push({ tx: sx, ty: sy, x: sx * TILE + TILE / 2, y: sy * TILE + TILE / 2, phase: (mx + my) % 3 });
+        }
+      }
+    };
+    for (const r of rooms.slice(1)) {
+      let best = connected[0];
+      let bd = Infinity;
+      const c = centerOf(r);
+      for (const o of connected) {
+        const oc = centerOf(o);
+        const d = (oc.x - c.x) ** 2 + (oc.y - c.y) ** 2;
+        if (d < bd) {
+          bd = d;
+          best = o;
+        }
+      }
+      corridor(r, best);
+      connected.push(r);
+    }
+    for (let k = 0; k < 6; k++) corridor(rng.pick(rooms), rng.pick(rooms));
+    this.rooms = rooms;
+    this.markClear(clear, cx, cy, 3);
+
+    // Gates in the three rooms farthest from the start, spread apart.
+    const byDist = rooms.slice(1).sort((a, b) => {
+      const ca = centerOf(a);
+      const cb = centerOf(b);
+      return (cb.x - cx) ** 2 + (cb.y - cy) ** 2 - ((ca.x - cx) ** 2 + (ca.y - cy) ** 2);
+    });
+    const gateRooms = [];
+    for (const r of byDist) {
+      const c = centerOf(r);
+      if (gateRooms.every((o) => (centerOf(o).x - c.x) ** 2 + (centerOf(o).y - c.y) ** 2 > (N * 0.3) ** 2)) gateRooms.push(r);
+      if (gateRooms.length === 3) break;
+    }
+    for (const r of byDist) if (gateRooms.length < 3 && !gateRooms.includes(r)) gateRooms.push(r);
+    const closeTimes = rng.shuffle([...GATE_CLOSE_TIMES]);
+    gateRooms.forEach((r, i) => {
+      const c = centerOf(r);
+      this.markClear(clear, c.x, c.y, 2);
+      this.pois.push({ type: 'gate', id: `gate${i}`, x: c.x * TILE + TILE / 2, y: c.y * TILE + TILE / 2, closesAt: closeTimes[i], open: true, radius: 12 });
+      this.torches.push({ x: c.x * TILE - 12, y: c.y * TILE + 26 }, { x: c.x * TILE + 28, y: c.y * TILE + 26 });
+    });
+    for (const r of rooms) r.used = gateRooms.includes(r) || r.start;
+
+    // The biggest unused room becomes the treasure vault.
+    const vault = rooms.filter((r) => !r.used).sort((a, b) => b.w * b.h - a.w * a.h)[0];
+    if (vault) {
+      vault.used = true;
+      const c = centerOf(vault);
+      this.markClear(clear, c.x, c.y, 2);
+      this.pois.push({ type: 'chest', x: c.x * TILE + TILE / 2, y: c.y * TILE + TILE / 2, rarity: rng.chance(0.25) ? 'legendary' : 'epic', treasure: true, opened: false, radius: 10 });
+      this.pois.push({ type: 'treasureGuard', x: c.x * TILE + TILE / 2, y: c.y * TILE + TILE / 2, spawned: false, radius: 0 });
+      this.torches.push({ x: vault.x * TILE + 10, y: vault.y * TILE + 14 }, { x: (vault.x + vault.w) * TILE - 10, y: vault.y * TILE + 14 });
+    }
+
+    // Other points of interest go in room interiors.
+    const spots = [];
+    for (const r of rooms) {
+      if (r.used) continue;
+      const tries = Math.max(1, Math.floor((r.w * r.h) / 40));
+      for (let k = 0; k < tries; k++) spots.push({ tx: rng.int(r.x + 2, r.x + r.w - 3), ty: rng.int(r.y + 2, r.y + r.h - 3) });
+      if (rng.chance(0.5)) this.torches.push({ x: (r.x + 1) * TILE, y: (r.y + 1) * TILE + 8 });
+    }
+    rng.shuffle(spots);
+    this.placePois(rng, spots, clear, (N / 80) ** 2);
+
+    // Pillars inside large rooms.
+    for (const r of rooms) {
+      if (r.w < 9 || r.h < 8 || r.start) continue;
+      for (const [px, py] of [[r.x + 2, r.y + 2], [r.x + r.w - 3, r.y + 2], [r.x + 2, r.y + r.h - 3], [r.x + r.w - 3, r.y + r.h - 3]]) {
+        if (!clear[this.idx(px, py)] && rng.chance(0.7)) tiles[this.idx(px, py)] = T.PILLAR;
+      }
+    }
+    // Spikes never sit on points of interest.
+    this.spikes = this.spikes.filter((s) => !clear[this.idx(s.tx, s.ty)] && tiles[this.idx(s.tx, s.ty)] === T.STONE);
+  }
+
+  placeGates(rng, cx, cy, dMin, dMax, clear) {
+    const N = this.n;
+    const closeTimes = rng.shuffle([...GATE_CLOSE_TIMES]);
+    const base = rng.range(0, TAU);
+    const gates = [];
+    for (let i = 0; i < 3; i++) {
+      const a = base + (i * TAU) / 3 + rng.range(-0.35, 0.35);
+      const d = rng.range(dMin, dMax);
+      const tx = clamp(Math.round(cx + Math.cos(a) * d), 6, N - 7);
+      const ty = clamp(Math.round(cy + Math.sin(a) * d), 6, N - 7);
+      gates.push({ tx, ty });
+      this.markClear(clear, tx, ty, 3);
+      this.pois.push({ type: 'gate', id: `gate${i}`, x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2, closesAt: closeTimes[i], open: true, radius: 12 });
+    }
+    return gates;
+  }
+
+  /** Camps, shrines, mysterious chests, ambush sites, a cursed zone and chests, scaled by map area. */
+  placePois(rng, spots, clear, area) {
+    const take = () => spots.pop();
+    const px = (s) => s.tx * TILE + TILE / 2;
+    const py = (s) => s.ty * TILE + TILE / 2;
+    const count = (base, max) => Math.min(max, Math.max(1, Math.round(base * area)));
+
+    for (let i = 0; i < (area > 1.5 ? 2 : 1); i++) {
+      const cursed = take();
+      if (!cursed) break;
+      this.markClear(clear, cursed.tx, cursed.ty, 2);
+      const zone = { x: px(cursed), y: py(cursed), r: 88 };
+      this.cursedZones.push(zone);
+      this.pois.push({ type: 'chest', x: zone.x, y: zone.y, rarity: 'epic', cursed: true, opened: false, radius: 10 });
+    }
+    for (let i = 0; i < count(3, 5); i++) {
+      const s = take();
+      if (!s) break;
+      this.markClear(clear, s.tx, s.ty, 2);
+      this.pois.push({ type: 'camp', x: px(s), y: py(s), spawned: false, radius: 0 });
+      this.pois.push({ type: 'chest', x: px(s), y: py(s) - 4, rarity: rng.chance(0.4) ? 'rare' : 'uncommon', opened: false, radius: 10 });
+      this.torches.push({ x: px(s) - 18, y: py(s) + 6 }, { x: px(s) + 18, y: py(s) + 6 });
+    }
+    const shrineKinds = rng.shuffle(['blood', 'greed', 'fortune', 'haste']);
+    for (let i = 0; i < count(3, 4); i++) {
+      const s = take();
+      if (!s) break;
+      this.markClear(clear, s.tx, s.ty, 2);
+      this.pois.push({ type: 'shrine', kind: shrineKinds[i % 4], x: px(s), y: py(s), used: false, radius: 12 });
+    }
+    for (let i = 0; i < count(3, 5); i++) {
+      const s = take();
+      if (!s) break;
+      this.markClear(clear, s.tx, s.ty, 2);
+      this.pois.push({ type: 'mystery', x: px(s), y: py(s), used: false, radius: 11 });
+    }
+    for (let i = 0; i < count(2, 4); i++) {
+      const s = take();
+      if (!s) break;
+      this.markClear(clear, s.tx, s.ty, 3);
+      this.pois.push({ type: 'ambush', x: px(s), y: py(s), triggered: false, radius: 22 });
+      // Subtle warning signs: scattered bones.
+      for (let k = 0; k < 4; k++) this.decor.push({ kind: 'bones', x: px(s) + rng.range(-20, 20), y: py(s) + rng.range(-16, 16) });
+    }
+    const chestTarget = count(14, 26);
+    while (spots.length > 0 && this.pois.filter((p) => p.type === 'chest').length < chestTarget) {
+      const s = take();
+      this.markClear(clear, s.tx, s.ty, 1);
+      this.pois.push({ type: 'chest', x: px(s), y: py(s), rarity: rng.chance(0.18) ? 'uncommon' : 'common', opened: false, radius: 10 });
+    }
+  }
+
+  /** Shared final passes: connectivity, props, decor, prop rows. */
+  finish(rng, generated) {
+    const N = this.n;
+    const tiles = this.tiles;
+    if (generated) this.ensureConnectivity(this.center.tx, this.center.ty);
+    else this.floodReach(this.center.tx, this.center.ty);
+    const b = this.biome;
 
     // Props for y-sorted drawing.
+    const treeKinds = Object.keys(b.trees || {});
     for (let ty = 0; ty < N; ty++) {
       for (let tx = 0; tx < N; tx++) {
         const t = tiles[this.idx(tx, ty)];
         const x = tx * TILE + TILE / 2;
         const y = ty * TILE + TILE - 1;
-        if (t === T.TREE || t === T.BORDER) {
+        if ((t === T.TREE && treeKinds.length) || (t === T.BORDER && b.border)) {
           // Only draw border trees that could ever be seen (near the playable area).
           const edge = Math.min(tx, ty, N - 1 - tx, N - 1 - ty);
           if (t === T.BORDER && edge < 1 && rng.chance(0.5)) continue;
-          const roll = rng.next();
-          const kind = t === T.BORDER || roll < 0.6 ? 'pine' : roll < 0.85 ? 'round' : 'dead';
+          const kind = t === T.BORDER ? b.border : rng.weightedKey(b.trees);
           this.props.push({ kind, variant: rng.int(0, 7), x: x + rng.int(-2, 2), y: y + rng.int(-1, 1) });
         } else if (t === T.PILLAR) {
           this.props.push({ kind: rng.chance(0.65) ? 'pillar' : 'pillarBroken', x, y });
@@ -230,18 +409,19 @@ export class GameMap {
       }
     }
 
-    // Flat decor.
-    for (let k = 0; k < 900; k++) {
-      const tx = rng.int(3, N - 4);
-      const ty = rng.int(3, N - 4);
-      const t = tiles[this.idx(tx, ty)];
-      if (t !== T.GRASS && t !== T.DARK) continue;
-      const roll = rng.next();
-      const kind = roll < 0.55 ? 'tuft' : roll < 0.75 ? 'flower' : roll < 0.87 ? 'bush' : roll < 0.95 ? 'rock' : 'mushroom';
-      this.decor.push({ kind, x: tx * TILE + rng.range(2, 14), y: ty * TILE + rng.range(2, 14), v: rng.int(0, 7) });
-    }
-    for (const g of this.pois.filter((p) => p.type === 'gate')) {
-      this.torches.push({ x: g.x - 20, y: g.y + 10 }, { x: g.x + 20, y: g.y + 10 });
+    // Flat decor on open ground.
+    if (generated) {
+      const decorTiles = b.layout === 'rooms' ? [T.STONE] : [T.GRASS, T.DARK];
+      for (let k = 0; k < Math.round(900 * (N / 80) ** 2); k++) {
+        const tx = rng.int(3, N - 4);
+        const ty = rng.int(3, N - 4);
+        if (!decorTiles.includes(tiles[this.idx(tx, ty)])) continue;
+        const kind = rng.weightedKey(b.decor);
+        this.decor.push({ kind, x: tx * TILE + rng.range(2, 14), y: ty * TILE + rng.range(2, 14), v: rng.int(0, 7) });
+      }
+      for (const gt of this.pois.filter((p) => p.type === 'gate')) {
+        if (b.layout !== 'rooms') this.torches.push({ x: gt.x - 20, y: gt.y + 10 }, { x: gt.x + 20, y: gt.y + 10 });
+      }
     }
 
     this.propRows = Array.from({ length: N }, () => []);
@@ -307,7 +487,7 @@ export class GameMap {
       y = clamp(y, 4, this.n - 5);
       for (const [ox, oy] of horizontal ? [[0, 0], [0, 1]] : [[0, 0], [1, 0]]) {
         const i = this.idx(x + ox, y + oy);
-        if (this.tiles[i] === T.GRASS || this.tiles[i] === T.DARK) this.tiles[i] = T.DIRT;
+        if (this.tiles[i] === T.GRASS || this.tiles[i] === T.DARK || this.tiles[i] === T.ICE || this.tiles[i] === T.LAVA) this.tiles[i] = T.DIRT;
         clear[i] = 1;
       }
     }
@@ -350,7 +530,7 @@ export class GameMap {
         let guard = 0;
         while (guard++ < 200) {
           const i = this.idx(x, y);
-          if (this.isSolid(x, y)) this.tiles[i] = T.DIRT;
+          if (this.isSolid(x, y) || this.tiles[i] === T.LAVA) this.tiles[i] = this.floorTile;
           if (this.reach[i]) break;
           if (x !== cx && (Math.abs(cx - x) >= Math.abs(cy - y) || y === cy)) x += Math.sign(cx - x);
           else y += Math.sign(cy - y);
@@ -505,9 +685,20 @@ export class GameMap {
       const x = cx + Math.cos(a) * d;
       const y = cy + Math.sin(a) * d;
       if (x < TILE * 2 || y < TILE * 2 || x > this.size - TILE * 2 || y > this.size - TILE * 2) continue;
-      if (this.isOpenReachable(x, y)) return { x, y };
+      if (this.isSafeOpen(x, y)) return { x, y };
     }
     return null;
+  }
+
+  /** True when no solid tile blocks the straight line between two points. */
+  lineOfSight(x0, y0, x1, y1) {
+    const d = Math.hypot(x1 - x0, y1 - y0);
+    const steps = Math.ceil(d / 6);
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      if (this.isSolidAt(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return false;
+    }
+    return true;
   }
 
   inCursedZone(x, y) {

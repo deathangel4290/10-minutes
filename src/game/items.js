@@ -5,6 +5,7 @@ import { RELICS } from '../data/relics.js';
 import { RARITY_INFO, RARITIES } from '../data/rarities.js';
 import { EMBER_RULES } from '../data/config.js';
 import { STAT_LABELS } from './statLabels.js';
+import { ARMOR_BASES, ARMOR_MATERIALS, ARMOR_LEGENDARIES, ARMOR_SLOTS } from '../data/armor.js';
 
 let uidCounter = 1;
 const uid = () => uidCounter++;
@@ -76,6 +77,68 @@ export function makeWeapon(rng, { rarity, itemLevel, types, type }) {
   };
 }
 
+/**
+ * Armor for a slot: base armor/HP (boots add speed) scaled by level and rarity, plus affixes.
+ * @param {import('../core/rng.js').RNG} rng
+ */
+export function makeArmor(rng, { rarity, itemLevel, slot }) {
+  const lvl = Math.max(1, Math.min(5, itemLevel));
+  slot = slot || rng.pick(ARMOR_SLOTS);
+  const base = ARMOR_BASES[slot];
+  const info = RARITY_INFO[rarity];
+  const mods = [];
+  const armor = Math.max(1, Math.round(base.armor * (1 + 0.32 * (lvl - 1)) * info.statMult * rng.range(0.9, 1.1)));
+  mods.push({ stat: 'armor', value: armor });
+  if (base.hp) mods.push({ stat: 'maxHp', value: Math.round(base.hp * (1 + 0.35 * (lvl - 1)) * info.statMult * rng.range(0.9, 1.1)) });
+  if (base.move) mods.push({ stat: 'moveSpeedPct', value: Math.round(base.move * info.statMult * 100) / 100 });
+
+  let legendary = null;
+  if (rarity === 'legendary') {
+    legendary = ARMOR_LEGENDARIES.find((l) => l.slot === slot);
+    for (const m of legendary.mods) mods.push({ ...m });
+  }
+  const pool = rng.shuffle(AFFIXES.filter((a) => a.stat !== 'moveSpeedPct' || slot !== 'boots'));
+  const affixCount = rarity === 'legendary' ? 2 : info.affixes;
+  const tierBonus = 1 + info.tier * 0.1;
+  for (let i = 0; i < affixCount && i < pool.length; i++) {
+    const a = pool[i];
+    let value = rng.range(a.roll[0], a.roll[1]) * 0.8 * (1 + a.scale * (lvl - 1)) * tierBonus;
+    value = a.fmt === 'int' ? Math.round(value) : Math.round(value * 1000) / 1000;
+    mods.push({ stat: a.stat, value, affix: a.id });
+  }
+  let name;
+  if (legendary) name = legendary.name;
+  else {
+    const prefixAffix = rarity === 'rare' || rarity === 'epic' ? AFFIXES.find((a) => a.id === mods.find((m) => m.affix)?.affix) : null;
+    name = `${prefixAffix ? prefixAffix.prefix + ' ' : ''}${rng.pick(ARMOR_MATERIALS[lvl])} ${rng.pick(base.names)}`;
+  }
+  return {
+    kind: 'armor',
+    uid: uid(),
+    slot,
+    rarity,
+    itemLevel: lvl,
+    name,
+    icon: base.icon,
+    mods,
+    special: legendary ? legendary.special : null,
+    legendaryId: legendary ? legendary.id : null,
+  };
+}
+
+/** A rough single number for comparing two armor pieces. */
+export function armorScore(item) {
+  if (!item) return 0;
+  let s = 0;
+  for (const m of item.mods) {
+    if (m.stat === 'armor') s += m.value * 3;
+    else if (m.stat === 'maxHp') s += m.value * 0.6;
+    else if (m.stat === 'moveSpeedPct') s += m.value * 100;
+    else s += 6;
+  }
+  return s;
+}
+
 export function starterWeapon() {
   const b = WEAPON_BASES.sword;
   return {
@@ -134,6 +197,16 @@ export function itemLines(item) {
       if (t) lines.push(t);
     }
     if (item.special) lines.push(`★ ${item.special}`);
+  } else if (item.kind === 'armor') {
+    const armor = item.mods.find((m) => m.stat === 'armor' && !m.affix);
+    const hp = item.mods.find((m) => m.stat === 'maxHp' && !m.affix);
+    lines.push(`${armor ? armor.value : 0} armor${hp ? ` \u00b7 +${hp.value} HP` : ''}`);
+    for (const m of item.mods) {
+      if (!m.affix) continue;
+      const t = formatMod(m);
+      if (t) lines.push(t);
+    }
+    if (item.special) lines.push(`\u2605 ${item.special}`);
   } else if (item.kind === 'relic') {
     lines.push(item.desc);
   } else if (item.kind === 'potion') {

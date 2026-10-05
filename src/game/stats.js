@@ -92,7 +92,7 @@ export function computePlayerStats(weapon, modLists) {
     knockback: weapon.knockback,
     critChance: Math.min(0.95, base.critChance + (weapon.critBonus || 0) + m.critChance),
     critDamage: base.critDamage + m.critDamage,
-    armorReduction: m.armor > 0 ? m.armor / (m.armor + 30) : 0,
+    armorReduction: m.armor > 0 ? Math.min(0.6, m.armor / (m.armor + 30)) : 0,
     regen: m.regen,
     lifesteal: m.lifesteal,
     pickupRadius: base.pickupRadius * (1 + m.pickupPct),

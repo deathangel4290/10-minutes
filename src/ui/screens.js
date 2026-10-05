@@ -1,13 +1,17 @@
-// Full-screen pages (title, camp, results) and in-run modals (level-up,
-// events, escape, merchant, pause, settings). Rendered as HTML strings with
-// data-action buttons; main.js handles the actions.
+// Full-screen pages (title, results), town modals (vendors, portal, records)
+// and in-run modals (level-up, events, escape, merchant, gear, pause,
+// settings). Rendered as HTML strings with data-action buttons; main.js
+// handles the actions.
 
 import { $, esc } from './dom.js';
-import { iconURL, artURL } from '../gfx/sprites.js';
+import { iconURL, artURL, canvasURL } from '../gfx/sprites.js';
+import { PLAYER_BASE } from '../data/config.js';
 import { itemIconURL } from './hud.js';
 import { formatTime, formatInt } from '../core/math.js';
 import { RARITY_INFO } from '../data/rarities.js';
-import { META_UPGRADES, META_UNLOCKS, nextMetaCost } from '../data/meta.js';
+import { META_BY_ID, UNLOCK_BY_ID, nextMetaCost } from '../data/meta.js';
+import { VENDOR_BY_ID } from '../data/town.js';
+import { BIOMES, BIOME_ORDER, biomeUnlocked } from '../data/biomes.js';
 import { UPGRADE_BY_ID } from '../data/upgrades.js';
 import { itemLines } from '../game/items.js';
 import { phaseForTimeLeft, PHASES } from '../data/config.js';
@@ -16,7 +20,8 @@ const ember = () => `<img src="${iconURL('ember', 'common', 2)}" alt="">`;
 const pips = (rank, max) => '◆'.repeat(rank) + '◇'.repeat(Math.max(0, max - rank));
 
 export class Screens {
-  constructor({ onAction }) {
+  constructor({ onAction, sprites }) {
+    this.sprites = sprites;
     this.screen = $('#screen');
     this.modal = $('#modal');
     this.onAction = onAction;
@@ -74,9 +79,8 @@ export class Screens {
         <div class="title-bottom">
           ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
           <div class="center"><span class="ember-pill">${ember()} ${formatInt(save.embers)} Embers</span></div>
-          <button class="btn btn-primary" data-action="start">ENTER THE RIFT<span class="sub">10 minutes. Escape before the eclipse.</span></button>
-          <div class="btn-row two" style="margin-top:0">
-            <button class="btn" data-action="camp">CAMP</button>
+          <button class="btn btn-primary" data-action="town">PLAY<span class="sub">Enter Emberfall, then step through the Rift</span></button>
+          <div class="btn-row" style="margin-top:0">
             <button class="btn" data-action="settings">SETTINGS</button>
           </div>
           <div class="records-line">${recs}</div>
@@ -86,67 +90,95 @@ export class Screens {
     );
   }
 
-  // ── Camp (permanent progression) ─────────────────────────
-  camp(save, tab = 'upgrades') {
-    let body = '';
-    if (tab === 'upgrades') {
-      body = META_UPGRADES.map((up) => {
-        const rank = save.meta[up.id] || 0;
-        const cost = nextMetaCost(up, rank);
-        const can = cost !== null && save.embers >= cost;
-        return `<div class="meta-row ${rank > 0 ? 'owned' : ''}">
-          <img src="${iconURL(up.icon, 'epic', 4)}" alt="">
-          <div><div class="nm">${esc(up.name)}</div><div class="ds">${esc(up.desc)}</div><div class="pips">${pips(rank, up.costs.length)}</div></div>
-          ${cost === null ? '<button class="btn cost-btn maxed" disabled>MAX</button>' : `<button class="btn cost-btn ${can ? 'can' : ''}" data-action="buyMeta" data-id="${up.id}" ${can ? '' : 'disabled'}>${ember()}${cost}</button>`}
-        </div>`;
-      }).join('');
-    } else if (tab === 'unlocks') {
-      body = META_UNLOCKS.map((un) => {
-        const owned = !!save.unlocks[un.id];
-        const can = !owned && save.embers >= un.cost;
-        return `<div class="meta-row ${owned ? 'owned' : ''}">
-          <img src="${iconURL(un.icon, owned ? 'legendary' : 'rare', 4)}" alt="">
-          <div><div class="nm">${esc(un.name)}</div><div class="ds">${esc(un.desc)}</div></div>
-          ${owned ? '<button class="btn cost-btn maxed" disabled>OWNED</button>' : `<button class="btn cost-btn ${can ? 'can' : ''}" data-action="buyUnlock" data-id="${un.id}" ${can ? '' : 'disabled'}>${ember()}${un.cost}</button>`}
-        </div>`;
-      }).join('');
-    } else {
-      const r = save.records;
-      const st = save.stats;
-      const cells = [
-        ['Best score', formatInt(r.bestScore)],
-        ['Longest survival', formatTime(r.bestSurvival)],
-        ['Latest escape', r.bestEscapeTime ? formatTime(r.bestEscapeTime) : '—'],
-        ['Most gold', formatInt(r.mostGold)],
-        ['Runs', st.runs],
-        ['Escapes', st.escapes],
-        ['Enemies slain', formatInt(st.kills)],
-        ['Elites slain', formatInt(st.elites)],
-        ['Colossi slain', st.champions],
-        ['Legendaries found', st.legendaries],
-        ['Embers earned', formatInt(save.totalEmbers)],
-        ['Time in the rift', formatTime(st.playSeconds)],
-      ];
-      body = `<div class="records-grid">${cells.map(([k, v]) => `<div class="rec"><div class="v">${v}</div><div class="k">${k.toUpperCase()}</div></div>`).join('')}</div>`;
+  // ── Town: vendors, portal, records ───────────────────────
+  metaRow(save, kind, id) {
+    if (kind === 'upgrade') {
+      const up = META_BY_ID[id];
+      const rank = save.meta[up.id] || 0;
+      const cost = nextMetaCost(up, rank);
+      const can = cost !== null && save.embers >= cost;
+      return `<div class="meta-row ${rank > 0 ? 'owned' : ''}">
+        <img src="${iconURL(up.icon, 'epic', 4)}" alt="">
+        <div><div class="nm">${esc(up.name)}</div><div class="ds">${esc(up.desc)}</div><div class="pips">${pips(rank, up.costs.length)}</div></div>
+        ${cost === null ? '<button class="btn cost-btn maxed" disabled>MAX</button>' : `<button class="btn cost-btn ${can ? 'can' : ''}" data-action="buyMeta" data-id="${up.id}" ${can ? '' : 'disabled'}>${ember()}${cost}</button>`}
+      </div>`;
     }
-    this.showScreen(`
-      <div class="screen-head">
-        <h2>THE CAMP</h2>
-        <span class="ember-pill">${ember()} ${formatInt(save.embers)}</span>
-      </div>
-      <div class="tabs">
-        ${['upgrades', 'unlocks', 'records'].map((t) => `<button class="tab ${t === tab ? 'on' : ''}" data-action="campTab" data-tab="${t}">${t.toUpperCase()}</button>`).join('')}
-      </div>
-      <div class="meta-list">${body}</div>
-      <div class="btn-row two">
-        <button class="btn" data-action="title">BACK</button>
-        <button class="btn btn-primary" data-action="start">ENTER THE RIFT</button>
-      </div>
-      <div class="hint">Embers come from every run. Escaping pays far more than dying.</div>`);
+    const un = UNLOCK_BY_ID[id];
+    const owned = !!save.unlocks[un.id];
+    const can = !owned && save.embers >= un.cost;
+    return `<div class="meta-row ${owned ? 'owned' : ''}">
+      <img src="${iconURL(un.icon, owned ? 'legendary' : 'rare', 4)}" alt="">
+      <div><div class="nm">${esc(un.name)}</div><div class="ds">${esc(un.desc)}</div></div>
+      ${owned ? '<button class="btn cost-btn maxed" disabled>OWNED</button>' : `<button class="btn cost-btn ${can ? 'can' : ''}" data-action="buyUnlock" data-id="${un.id}" ${can ? '' : 'disabled'}>${ember()}${un.cost}</button>`}
+    </div>`;
+  }
+
+  vendor(save, vendorId, fresh = true) {
+    const v = VENDOR_BY_ID[vendorId];
+    const portrait = canvasURL(this.sprites.npc[v.id].r, 5);
+    const rows = v.items.map((it) => this.metaRow(save, it.kind, it.id)).join('');
+    this.showModal(
+      `<div class="panel">
+        <div class="vendor-head">
+          <img src="${portrait}" alt="">
+          <div><h2 class="modal-title" style="color:${v.color};text-align:left">${esc(v.name)}</h2><p class="modal-sub" style="text-align:left;margin:0">${esc(v.greeting)}</p></div>
+        </div>
+        <div class="center" style="margin:8px 0"><span class="ember-pill">${ember()} ${formatInt(save.embers)} Embers</span></div>
+        <div class="meta-list">${rows}</div>
+        <div class="btn-row"><button class="btn" data-action="townClose">LEAVE</button></div>
+      </div>`,
+      { fresh },
+    );
+  }
+
+  portal(save) {
+    const cards = BIOME_ORDER.map((id) => {
+      const b = BIOMES[id];
+      const open = biomeUnlocked(save, id);
+      const rec = (save.regions && save.regions[id]) || {};
+      const skulls = '\u2620'.repeat(Math.round((b.difficulty - 0.6) * 3.3));
+      const lockedBy = b.unlockedBy ? BIOMES[b.unlockedBy].name : '';
+      return `<div class="region ${open ? '' : 'locked'}" style="--rc:${b.color}">
+        <div class="region-top"><div class="nm">${esc(b.name)}</div><div class="danger-skulls" title="Danger">${skulls}</div></div>
+        <div class="ds">${esc(b.blurb)}</div>
+        <div class="region-meta">${open ? `REWARDS x${b.reward} \u00b7 MAP ${b.size}x${b.size}${rec.escapes ? ` \u00b7 ESCAPED ${rec.escapes}x` : ''}${rec.best ? ` \u00b7 BEST ${formatTime(rec.best)}` : ''}` : `LOCKED \u00b7 ESCAPE THE ${esc(lockedBy.toUpperCase())} TO OPEN`}</div>
+        ${open ? `<button class="btn btn-primary btn-small" data-action="enterRegion" data-biome="${id}">ENTER</button>` : ''}
+      </div>`;
+    }).join('');
+    this.showModal(`<div class="panel">
+      <h2 class="modal-title" style="color:var(--purple-hi)">RIFT PORTAL</h2>
+      <p class="modal-sub">Choose a region. You have 10 minutes. Escape through a Rift Gate before the eclipse.</p>
+      <div class="regions">${cards}</div>
+      <div class="btn-row"><button class="btn" data-action="townClose">NOT YET</button></div>
+    </div>`);
+  }
+
+  board(save) {
+    const r = save.records;
+    const st = save.stats;
+    const cells = [
+      ['Best score', formatInt(r.bestScore)],
+      ['Longest survival', formatTime(r.bestSurvival)],
+      ['Latest escape', r.bestEscapeTime ? formatTime(r.bestEscapeTime) : '\u2014'],
+      ['Most gold', formatInt(r.mostGold)],
+      ['Runs', st.runs],
+      ['Escapes', st.escapes],
+      ['Enemies slain', formatInt(st.kills)],
+      ['Elites slain', formatInt(st.elites)],
+      ['Colossi slain', st.champions],
+      ['Legendaries found', st.legendaries],
+      ['Embers earned', formatInt(save.totalEmbers)],
+      ['Time in the rift', formatTime(st.playSeconds)],
+    ];
+    this.showModal(`<div class="panel">
+      <h2 class="modal-title">RECORDS</h2>
+      <div class="records-grid">${cells.map(([k, v]) => `<div class="rec"><div class="v">${v}</div><div class="k">${k.toUpperCase()}</div></div>`).join('')}</div>
+      <div class="btn-row"><button class="btn" data-action="townClose">CLOSE</button></div>
+    </div>`);
   }
 
   // ── Results ───────────────────────────────────────────────
-  results(res, { newRecords = [], unlockHint = null, embersBefore = 0 } = {}) {
+  results(res, { newRecords = [], unlockHint = null, embersBefore = 0, regionUnlocked = null } = {}) {
     const escaped = res.outcome === 'escaped';
     const best = res.bestItem;
     const items = [...res.items].sort((a, b) => RARITY_INFO[b.rarity].tier - RARITY_INFO[a.rarity].tier);
@@ -185,10 +217,11 @@ export class Screens {
           <div class="embers-total">${ember()}<span id="ember-count">+0</span></div>
           <div class="embers-rows">${rows}</div>
         </div>
-        ${unlockHint ? `<div class="unlock-banner"><div class="k">NEW UNLOCK AVAILABLE</div><div class="t">${esc(unlockHint.name)} · ${unlockHint.cost} Embers</div></div>` : ''}
+        ${regionUnlocked ? `<div class="unlock-banner"><div class="k">NEW REGION UNLOCKED</div><div class="t">${esc(regionUnlocked)} · enter it from the Rift Portal</div></div>` : ''}
+        ${unlockHint ? `<div class="unlock-banner"><div class="k">NEW UNLOCK AVAILABLE</div><div class="t">${esc(unlockHint.name)} · ${unlockHint.cost} Embers${unlockHint.vendor ? ` · ${esc(unlockHint.vendor)}` : ''}</div></div>` : ''}
         <div class="btn-row">
-          <button class="btn btn-primary" data-action="start">TRY AGAIN</button>
-          <button class="btn ${unlockHint ? 'btn-purple' : ''}" data-action="camp">${unlockHint ? 'SPEND EMBERS AT CAMP' : 'CAMP'}</button>
+          <button class="btn btn-primary" data-action="start">TRY AGAIN<span class="sub">${esc(res.biomeName || '')}</span></button>
+          <button class="btn ${unlockHint || regionUnlocked ? 'btn-purple' : ''}" data-action="town">${unlockHint ? 'SPEND EMBERS IN TOWN' : 'RETURN TO TOWN'}</button>
         </div>
       </div>`);
     // Count the Embers up.
@@ -357,10 +390,84 @@ export class Screens {
       ${relics ? `<div class="section-label">RELICS</div><div class="build-list">${relics}</div>` : ''}
       <div class="btn-row">
         <button class="btn btn-primary" data-action="resume">RESUME</button>
+        <button class="btn" data-action="gear">EQUIPMENT</button>
         <button class="btn" data-action="settings">SETTINGS</button>
         <button class="btn btn-danger" data-action="abandonConfirm">ABANDON RUN<span class="sub">Counts as a death</span></button>
       </div>
     </div>`);
+  }
+
+  /** Equipment screen: what you're wearing, your stats, relics and bag. */
+  gear(run, selectedUid = null) {
+    const p = run.player;
+    const s = p.stats;
+    const slots = [
+      ['helm', 'HELM', p.gear.helm, 'helm'],
+      ['weapon', 'WEAPON', p.weapon, 'sword'],
+      ['chest', 'CHEST', p.gear.chest, 'cuirass'],
+      ['boots', 'BOOTS', p.gear.boots, 'greaves'],
+    ];
+    const all = [p.weapon, ...Object.values(p.gear).filter(Boolean), ...run.bag, ...p.relics];
+    const selected = all.find((it) => it && it.uid === Number(selectedUid)) || p.weapon;
+    const doll = canvasURL(this.sprites.playerSprites(p.gear).player_idle.r, 6);
+    const slotHtml = slots
+      .map(([key, label, item, emptyIcon]) => {
+        const color = item ? RARITY_INFO[item.rarity].color : 'var(--line)';
+        const img = item ? itemIconURL(item, 4) : iconURL(emptyIcon, 'common', 4);
+        return `<button class="slot s-${key} ${item && item === selected ? 'sel' : ''}" data-action="gearSelect" data-uid="${item ? item.uid : ''}">
+          <div class="box" style="border-color:${color}"><img src="${img}" alt="" style="${item ? '' : 'opacity:.25'}"></div>
+          <div class="lab">${label}</div>
+        </button>`;
+      })
+      .join('');
+    const detail = selected
+      ? `<div class="gear-detail"><div class="nm" style="color:${RARITY_INFO[selected.rarity].color}">${esc(selected.name)}</div>
+          <div>${RARITY_INFO[selected.rarity].label} ${selected.kind === 'armor' ? selected.slot.toUpperCase() : selected.kind === 'relic' ? 'RELIC' : (selected.type || '').toUpperCase()}</div>
+          ${itemLines(selected).map((l) => `<div>${esc(l)}</div>`).join('')}</div>`
+      : '';
+    const stat = (k, v) => `<div><span class="k">${k}</span><span class="v">${v}</span></div>`;
+    const stats = [
+      stat('Damage', Math.round(s.damage)),
+      stat('Attacks/s', (1 / s.attackInterval).toFixed(1)),
+      stat('Crit chance', `${Math.round(s.critChance * 100)}%`),
+      stat('Crit damage', `x${s.critDamage.toFixed(1)}`),
+      stat('Max HP', s.maxHp),
+      stat('Armor', `${s.raw.armor} (-${Math.round(s.armorReduction * 100)}%)`),
+      stat('Regen', `${s.regen.toFixed(1)}/s`),
+      stat('Lifesteal', `${(s.lifesteal * 100).toFixed(1)}%`),
+      stat('Move speed', `${Math.round((s.moveSpeed / PLAYER_BASE.moveSpeed) * 100)}%`),
+      stat('Dash', `${s.dashCooldown.toFixed(1)}s`),
+    ].join('');
+    const relics = p.relics.length
+      ? `<div class="section-label">RELICS</div><div class="build-list">${p.relics
+          .map((r) => `<button class="build-chip" data-action="gearSelect" data-uid="${r.uid}"><img src="${iconURL(r.icon, r.rarity, 2)}" alt=""><span style="color:${RARITY_INFO[r.rarity].color}">${esc(r.name)}</span></button>`)
+          .join('')}</div>`
+      : '';
+    const bag = run.bag
+      .filter((it) => it.kind === 'weapon' || it.kind === 'armor')
+      .sort((a, b) => RARITY_INFO[b.rarity].tier - RARITY_INFO[a.rarity].tier)
+      .map((it) => {
+        const lines = itemLines(it).slice(0, 2).join(' · ');
+        return `<div class="shop-row">
+          <img src="${itemIconURL(it, 3)}" alt="">
+          <div><div class="nm" style="color:${RARITY_INFO[it.rarity].color}">${esc(it.name)}</div><div class="ds">${esc(lines)}</div></div>
+          <button class="btn btn-small" data-action="gearEquip" data-uid="${it.uid}">EQUIP</button>
+        </div>`;
+      })
+      .join('');
+    this.showModal(
+      `<div class="panel">
+        <h2 class="modal-title">EQUIPMENT</h2>
+        <div class="paperdoll">${slotHtml}<img class="doll" src="${doll}" alt="Your character"></div>
+        ${detail}
+        <div class="gear-stats">${stats}</div>
+        ${relics}
+        <div class="section-label" style="margin-top:6px">BAG</div>
+        <div class="bag-list">${bag || '<div class="hint" style="margin:0">Items you pick up but don\'t wear go here. Escape to turn them into Embers.</div>'}</div>
+        <div class="btn-row"><button class="btn btn-primary" data-action="gearClose">BACK TO THE FIGHT</button></div>
+      </div>`,
+      { fresh: false },
+    );
   }
 
   confirm(text, yesAction, noAction) {

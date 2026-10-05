@@ -19,6 +19,7 @@ export class Player {
     this.animT = 0;
 
     this.weapon = weapon;
+    this.gear = { helm: null, chest: null, boots: null };
     this.relics = [];
     this.upgrades = {};
     this.buffs = []; // shrine boons/banes: { id, mods }
@@ -43,6 +44,9 @@ export class Player {
     this.shield = 0;
     this.shieldT = 0;
     this.hurtFlash = 0;
+    this.regenPause = 0;
+    this.lifestealBudget = 0;
+    this.slowMult = 1;
     this.orbitAngle = 0;
     this.dead = false;
     this.lastHitBy = null;
@@ -56,6 +60,7 @@ export class Player {
 
   allModLists() {
     const lists = [this.metaMods, this.weapon.mods];
+    for (const g of Object.values(this.gear)) if (g) lists.push(g.mods);
     for (const [id, rank] of Object.entries(this.upgrades)) {
       const u = UPGRADE_BY_ID[id];
       if (u) lists.push(upgradeMods(u, rank));
@@ -81,11 +86,24 @@ export class Player {
     return this.dashT > 0;
   }
 
-  heal(amount) {
+  /**
+   * Restore HP. Passive healing (regen, lifesteal, on-kill) weakens as the
+   * eclipse nears; potions and blessings (`raw`) always heal in full.
+   */
+  heal(amount, raw = false) {
     if (amount <= 0 || this.dead) return 0;
+    if (!raw) amount *= this.run.phase.healMult ?? 1;
     const before = this.hp;
     this.hp = Math.min(this.stats.maxHp, this.hp + amount);
     return this.hp - before;
+  }
+
+  /** Lifesteal draws from a budget that refills each second, so it can't outheal a crowd. */
+  lifestealHeal(amount) {
+    const take = Math.min(amount, this.lifestealBudget);
+    if (take <= 0) return 0;
+    this.lifestealBudget -= take;
+    return this.heal(take);
   }
 
   addXp(amount) {
@@ -114,8 +132,11 @@ export class Player {
       if (this.shieldT <= 0) this.shield = 0;
     }
 
-    // Regeneration.
-    if (s.regen > 0) this.heal(s.regen * dt);
+    // Regeneration pauses briefly after every hit, so tanking a crowd doesn't out-heal it.
+    this.regenPause -= dt;
+    if (s.regen > 0 && this.regenPause <= 0) this.heal(s.regen * dt);
+    const lsCap = s.maxHp * 0.03 + 2;
+    this.lifestealBudget = Math.min(lsCap, this.lifestealBudget + lsCap * dt);
 
     // Movement.
     const mx = input.moveX;
@@ -147,7 +168,7 @@ export class Player {
         }
       }
     } else if (this.moving) {
-      const speed = s.moveSpeed * mag;
+      const speed = s.moveSpeed * mag * this.slowMult;
       this.x += Math.cos(this.moveAngle) * speed * dt;
       this.y += Math.sin(this.moveAngle) * speed * dt;
     }
@@ -277,17 +298,23 @@ export class Player {
     const run = this.run;
     if (this.potions <= 0 || this.hp >= this.stats.maxHp || this.dead) return;
     this.potions--;
-    const healed = this.heal(this.stats.maxHp * PLAYER_BASE.potionHeal);
+    const healed = this.heal(this.stats.maxHp * PLAYER_BASE.potionHeal, true);
     run.effects.number(this.x, this.y - 18, `+${Math.round(healed)}`, '#7fd65a', 1);
     run.effects.burst(this.x, this.y - 6, ['#e0384a', '#ff9a9a', '#7fd65a'], 12, 40, 0.5, -30);
     run.hooks.sfx('potion');
   }
 
-  /** @returns {number} damage actually taken */
-  takeDamage(amount, source) {
+  /**
+   * @param {number} amount
+   * @param {object|null} source the enemy that dealt it (for thorns and the death screen)
+   * @param {string} [hazard] name of an environmental hazard; hazards ignore i-frames
+   * @returns {number} damage actually taken
+   */
+  takeDamage(amount, source, hazard = null) {
     const run = this.run;
-    if (this.dead || this.iframes > 0 || this.dashT > 0 || run.ended) return 0;
-    let dmg = amount * (1 - this.stats.armorReduction) * run.playerDamageTakenMult;
+    if (this.dead || run.ended) return 0;
+    if (!hazard && (this.iframes > 0 || this.dashT > 0)) return 0;
+    let dmg = amount * (1 - (hazard ? this.stats.armorReduction * 0.5 : this.stats.armorReduction)) * run.playerDamageTakenMult;
     if (this.shield > 0) {
       const absorbed = Math.min(this.shield, dmg);
       this.shield -= absorbed;
@@ -297,17 +324,24 @@ export class Player {
     dmg = Math.max(dmg > 0 ? 1 : 0, Math.round(dmg));
     if (dmg <= 0) return 0;
     this.hp -= dmg;
-    this.iframes = PLAYER_BASE.iframes;
+    this.regenPause = 2.5;
     this.hurtFlash = 0.18;
     this.lastHitBy = source;
+    this.lastHazard = hazard;
     run.stats.damageTaken += dmg;
     run.effects.number(this.x, this.y - 16, dmg, '#ff5a5a', 1);
-    run.hooks.sfx('hurt');
-    run.hooks.shake(4);
-    run.hooks.haptic(35);
-    run.hooks.damageFlash();
+    if (hazard) {
+      run.hooks.sfx('hazard');
+    } else {
+      this.iframes = PLAYER_BASE.iframes;
+      run.hooks.sfx('hurt');
+      run.hooks.shake(4);
+      run.hooks.haptic(35);
+      run.hooks.damageFlash();
+      if (source) this.hitFrom = Math.atan2(source.y - this.y, source.x - this.x);
+    }
 
-    if (source && source.hp > 0 && this.stats.raw.thorns > 0) {
+    if (!hazard && source && source.hp > 0 && this.stats.raw.thorns > 0) {
       run.combat.hitEnemy(source, this.stats.damage * this.stats.raw.thorns, { source: 'thorns', noProc: true, noCrit: true });
     }
 
@@ -322,7 +356,7 @@ export class Player {
       } else {
         this.hp = 0;
         this.dead = true;
-        run.onPlayerDeath(source);
+        run.onPlayerDeath(source, hazard);
       }
     }
     return dmg;

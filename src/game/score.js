@@ -9,7 +9,7 @@ export function riskMultiplier(elapsed) {
   return 1 + Math.max(0, elapsed - 60) / (RUN_DURATION - 60);
 }
 
-export function computeEmbers({ outcome, gold, kills, elites, champions, elapsed, items }) {
+export function computeEmbers({ outcome, gold, kills, elites, champions, elapsed, items, regionMult = 1 }) {
   const r = EMBER_RULES;
   const rows = [];
   const add = (label, value) => {
@@ -32,6 +32,11 @@ export function computeEmbers({ outcome, gold, kills, elites, champions, elapsed
   } else {
     total = Math.round(base * r.deathKeep);
     rows.push({ label: `Lost when you fell (-${Math.round((1 - r.deathKeep) * 100)}%)`, value: total - base, negative: true });
+  }
+  if (regionMult !== 1) {
+    const extra = Math.round(total * (regionMult - 1));
+    rows.push({ label: `Region bonus (x${regionMult})`, value: extra });
+    total += extra;
   }
   return { total: Math.max(outcome === 'escaped' ? 5 : 1, Math.round(total)), rows, lostItemValue: outcome === 'escaped' ? 0 : itemValue };
 }

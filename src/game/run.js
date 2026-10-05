@@ -2,7 +2,9 @@
 // the outside (UI, audio, haptics) only through `hooks`, so it can also run
 // headless in tests and balance simulations.
 
-import { RUN_DURATION, PHASES, MAP_TILES, TILE } from '../data/config.js';
+import { RUN_DURATION, PHASES, TILE } from '../data/config.js';
+import { BIOMES } from '../data/biomes.js';
+import { Hazards } from './hazards.js';
 import { RNG } from '../core/rng.js';
 import { GameMap } from './map.js';
 import { Player } from './player.js';
@@ -13,7 +15,7 @@ import { Director } from './director.js';
 import { Events } from './events.js';
 import { Effects } from './effects.js';
 import { rollUpgradeChoices } from './upgrades.js';
-import { starterWeapon } from './items.js';
+import { starterWeapon, armorScore } from './items.js';
 import { metaMods } from '../data/meta.js';
 import { weaponDps } from './stats.js';
 import { computeEmbers, computeScore } from './score.js';
@@ -40,12 +42,13 @@ const GRID_CELL = 24;
 
 export class Run {
   /**
-   * @param {{seed:number, meta:object, unlocks:object, hooks?:object, viewW?:number, viewH?:number}} opts
+   * @param {{seed:number, biome?:string, meta:object, unlocks:object, hooks?:object, viewW?:number, viewH?:number}} opts
    */
-  constructor({ seed, meta = {}, unlocks = {}, hooks = {}, viewW = 176, viewH = 380 }) {
+  constructor({ seed, biome = 'forest', meta = {}, unlocks = {}, hooks = {}, viewW = 176, viewH = 380 }) {
     this.seed = seed >>> 0;
+    this.biome = BIOMES[biome] || BIOMES.forest;
     this.rng = new RNG(this.seed ^ 0x5bd1e995);
-    this.map = new GameMap(this.seed);
+    this.map = new GameMap(this.seed, this.biome);
     this.hooks = { ...NOOP_HOOKS, ...hooks };
     this.viewW = viewW;
     this.viewH = viewH;
@@ -58,7 +61,7 @@ export class Run {
 
     this.enemies = [];
     this.pois = this.map.pois.map((p) => ({ ...p, discovered: p.type === 'gate' }));
-    this.explored = new Uint8Array(MAP_TILES * MAP_TILES);
+    this.explored = new Uint8Array(this.map.n * this.map.n);
     this.effects = new Effects();
     this.combat = new Combat(this);
     this.pickups = new Pickups(this);
@@ -75,6 +78,7 @@ export class Run {
     this.pendingAmbush = null;
 
     this.player = new Player(this, { weapon: starterWeapon(), metaMods: metaMods(meta) });
+    this.hazards = new Hazards(this);
     this.modal = null;
     this.ended = false;
     this.result = null;
@@ -127,6 +131,7 @@ export class Run {
     }
 
     this.player.update(dt, input);
+    this.hazards.update(dt);
     this.updateEnemies(dt);
     this.combat.update(dt);
     this.pickups.update(dt);
@@ -202,7 +207,7 @@ export class Run {
   }
 
   reveal() {
-    const N = MAP_TILES;
+    const N = this.map.n;
     const tx = Math.floor(this.player.x / TILE);
     const ty = Math.floor(this.player.y / TILE);
     const r = 7;
@@ -333,6 +338,18 @@ export class Run {
       this.hooks.itemPickup(item, null);
       return true;
     }
+    if (item.kind === 'armor') {
+      this.bag.push(item);
+      const current = p.gear[item.slot];
+      const compare = { current, scoreDelta: armorScore(item) - armorScore(current) };
+      if (!current) {
+        this.equipItem(item.uid, true);
+        compare.autoEquipped = true;
+      }
+      this.hooks.sfx(RARITY_INFO[item.rarity].tier >= 3 ? 'pickupRare' : 'pickup');
+      this.hooks.itemPickup(item, compare);
+      return true;
+    }
     // Weapon: goes to the bag; the UI offers to equip it.
     this.bag.push(item);
     const compare = this.compareWeapon(item);
@@ -353,28 +370,41 @@ export class Run {
     return { current: p.weapon, dpsDelta: cur > 0 ? next / cur - 1 : 0 };
   }
 
-  equipWeapon(uid, silent = false) {
+  /** Equip a weapon or armor piece from the bag; whatever it replaces goes back in the bag. */
+  equipItem(uid, silent = false) {
     const p = this.player;
     const idx = this.bag.findIndex((it) => it.uid === uid);
     if (idx < 0) return false;
     const item = this.bag[idx];
     this.bag.splice(idx, 1);
-    if (!p.weapon.starter) this.bag.push(p.weapon);
-    p.weapon = item;
+    if (item.kind === 'armor') {
+      const old = p.gear[item.slot];
+      if (old) this.bag.push(old);
+      p.gear[item.slot] = item;
+    } else {
+      if (!p.weapon.starter) this.bag.push(p.weapon);
+      p.weapon = item;
+    }
     p.recompute();
+    p.gearVersion = (p.gearVersion || 0) + 1;
     if (!silent) this.hooks.sfx('equip');
     return true;
+  }
+
+  equipWeapon(uid, silent = false) {
+    return this.equipItem(uid, silent);
   }
 
   /** Everything the player would keep by escaping now. */
   haul() {
     const items = [...this.bag, ...this.player.relics];
     if (!this.player.weapon.starter) items.push(this.player.weapon);
+    for (const g of Object.values(this.player.gear)) if (g) items.push(g);
     return items;
   }
 
   estimateEmbers() {
-    return computeEmbers({ outcome: 'escaped', gold: this.gold, kills: this.stats.kills, elites: this.stats.elites, champions: this.stats.champions, elapsed: this.elapsed, items: this.haul() }).total;
+    return computeEmbers({ outcome: 'escaped', gold: this.gold, kills: this.stats.kills, elites: this.stats.elites, champions: this.stats.champions, elapsed: this.elapsed, items: this.haul(), regionMult: this.biome.reward }).total;
   }
 
   // ── Phase / death / end ───────────────────────────────────
@@ -385,11 +415,12 @@ export class Run {
     this.hooks.sfx('phase');
   }
 
-  onPlayerDeath(source) {
+  onPlayerDeath(source, hazard = null) {
     const p = this.player;
     let near = 0;
     for (const e of this.enemies) if (!e.dead && (e.x - p.x) ** 2 + (e.y - p.y) ** 2 < 60 * 60) near++;
-    this.end('died', { cause: 'enemy', killer: source, near });
+    if (hazard) this.end('died', { cause: 'hazard', hazard, near });
+    else this.end('died', { cause: 'enemy', killer: source, near });
   }
 
   end(outcome, info = {}) {
@@ -397,7 +428,7 @@ export class Run {
     this.ended = true;
     const items = this.haul();
     const elapsed = this.elapsed;
-    const common = { outcome, gold: this.gold, goldFound: this.stats.goldFound, kills: this.stats.kills, elites: this.stats.elites, champions: this.stats.champions, elapsed, items };
+    const common = { outcome, gold: this.gold, goldFound: this.stats.goldFound, kills: this.stats.kills, elites: this.stats.elites, champions: this.stats.champions, elapsed, items, regionMult: this.biome.reward };
     const embers = computeEmbers(common);
     const score = computeScore(common);
 
@@ -410,10 +441,13 @@ export class Run {
       } else if (info.cause === 'abandon') {
         causeTitle = 'Run abandoned';
         causeDetail = 'You turned back. The dark keeps what you carried.';
+      } else if (info.cause === 'hazard') {
+        causeTitle = { Lava: 'Burned in the lava', Frostbite: 'Frozen solid', 'Spike trap': 'Impaled by a spike trap', Eruption: 'Caught in an eruption' }[info.hazard] || `Killed by ${info.hazard}`;
+        causeDetail = info.near >= 3 ? `${info.near} enemies were closing in too.` : this.biome.hazard === 'frost' ? 'Standing still in the cold is deadly. Keep moving or find a campfire.' : 'Watch the ground: red and glowing means danger.';
       } else {
         const k = info.killer;
-        const name = k ? `${k.elite && !k.champion ? 'Elite ' : ''}${k.def.name}` : 'the dark';
-        causeTitle = `Slain by ${/^[AEIOU]/.test(name) ? 'an' : 'a'} ${name}`;
+        const name = k ? `${k.elite && !k.champion ? 'Elite ' : ''}${k.def.name}` : null;
+        causeTitle = name ? `Slain by ${/^[AEIOU]/.test(name) ? 'an' : 'a'} ${name}` : 'Slain in the dark';
         causeDetail = info.near >= 5 ? `You were overwhelmed by ${info.near} enemies.` : info.near >= 2 ? `${info.near} enemies had you cornered.` : 'It caught you alone.';
       }
     }
@@ -440,6 +474,8 @@ export class Run {
       embers,
       build: Object.entries(this.player.upgrades).sort((a, b) => b[1] - a[1]),
       weapon: this.player.weapon,
+      biome: this.biome.id,
+      biomeName: this.biome.name,
     };
     this.hooks.end(this.result);
   }

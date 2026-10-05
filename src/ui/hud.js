@@ -3,30 +3,64 @@
 import { $, esc, setText, setStyle, setClass } from './dom.js';
 import { iconURL } from '../gfx/sprites.js';
 import { formatTime, formatInt } from '../core/math.js';
-import { PLAYER_BASE, MAP_TILES } from '../data/config.js';
+import { PLAYER_BASE } from '../data/config.js';
+import { BIOME_PALETTES } from '../gfx/palette.js';
 import { RARITY_INFO } from '../data/rarities.js';
 import { itemLines } from '../game/items.js';
 import { T } from '../game/map.js';
 
-const MINIMAP_COLORS = {
-  [T.GRASS]: [32, 58, 44],
-  [T.DARK]: [24, 46, 38],
-  [T.DIRT]: [74, 58, 63],
-  [T.STONE]: [58, 56, 80],
-  [T.WALL]: [110, 100, 140],
-  [T.TREE]: [14, 34, 26],
-  [T.BORDER]: [8, 16, 13],
-  [T.PILLAR]: [90, 84, 116],
-};
+function minimapColors(paletteName) {
+  const m = (BIOME_PALETTES[paletteName] || BIOME_PALETTES.forest).minimap;
+  return {
+    [T.GRASS]: m.ground,
+    [T.DARK]: m.dark,
+    [T.DIRT]: m.dirt,
+    [T.STONE]: m.stone,
+    [T.WALL]: m.wall,
+    [T.TREE]: m.tree,
+    [T.BORDER]: m.border,
+    [T.PILLAR]: m.wall,
+    [T.ICE]: m.pool,
+    [T.LAVA]: m.pool,
+    [T.COBBLE]: m.stone,
+  };
+}
 
 export function itemIconURL(item, scale = 4) {
   if (item.kind === 'weapon') return iconURL(item.type, item.rarity, scale);
+  if (item.kind === 'armor') return iconURL(item.icon, item.rarity, scale);
   if (item.kind === 'relic') return iconURL(item.icon, item.rarity, scale);
   return iconURL('potion', 'common', scale);
 }
 
+/** One short line that always says what to do next. */
+function objectiveText(run) {
+  const p = run.player;
+  let best = null;
+  let bd = Infinity;
+  for (const g of run.pois) {
+    if (g.type !== 'gate' || !g.open) continue;
+    const d = Math.hypot(g.x - p.x, g.y - p.y);
+    if (d < bd) {
+      bd = d;
+      best = g;
+    }
+  }
+  if (!best) return 'NO GATES LEFT';
+  const meters = Math.round(bd / 8);
+  const closing = run.pois.find((g) => g.type === 'gate' && g.open && g.closing);
+  if (closing) return `A GATE CLOSES IN ${Math.max(0, Math.ceil(run.timeLeft - closing.closesAt))}S`;
+  if (run.timeLeft <= 60) return `ESCAPE! GATE ${meters}M`;
+  return `GATE ${meters}M \u00b7 LOOT, THEN LEAVE`;
+}
+
+function statOf(item, stat) {
+  if (!item) return 0;
+  return item.mods.filter((m) => m.stat === stat).reduce((s, m) => s + m.value, 0);
+}
+
 export class Hud {
-  constructor({ onPause, onEquip }) {
+  constructor({ onPause, onEquip, onGear }) {
     this.root = $('#hud');
     this.hp = $('.bar-hp', this.root);
     this.hpFill = $('.bar-hp .bar-fill', this.root);
@@ -47,7 +81,9 @@ export class Hud {
     this.card = $('#pickup-card');
     this.minimap = $('#minimap');
     this.mctx = this.minimap.getContext('2d');
-    this.mimg = this.mctx.createImageData(MAP_TILES, MAP_TILES);
+    this.mimg = null;
+    this.status = $('#status');
+    this.objective = $('.objective', this.root);
     this.vignette = $('#fx-vignette');
     this.flash = $('#fx-flash');
     this.btnNova = $('#btn-nova');
@@ -68,6 +104,11 @@ export class Hud {
     $('#btn-pause').addEventListener('click', (e) => {
       e.stopPropagation();
       onPause();
+    });
+    $('#btn-gear img').src = iconURL('bag', 'common', 2);
+    $('#btn-gear').addEventListener('click', (e) => {
+      e.stopPropagation();
+      onGear();
     });
     this.onEquip = onEquip;
     this.card.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -122,6 +163,20 @@ export class Hud {
     setText(this.potionBadge, `${p.potions}`);
     setClass(this.btnPotion, 'empty', p.potions <= 0);
 
+    // Status chips: what is happening to you right now.
+    const chips = [];
+    if (run.hunted) chips.push(['danger', 'HUNTED \u00b7 KEEP MOVING']);
+    else if (run.huntProgress > 0.6) chips.push(['warn', 'LINGERING TOO LONG']);
+    if (run.frost > 2) chips.push(['frost', run.frost > 4 ? 'FREEZING \u00b7 MOVE!' : 'GETTING COLD']);
+    if (run.map.tileAt(p.x, p.y) === T.LAVA) chips.push(['danger', 'BURNING']);
+    if ((run.phase.healMult ?? 1) < 1) chips.push(['muted', `HEALING -${Math.round((1 - run.phase.healMult) * 100)}%`]);
+    const chipKey = chips.map((c) => c.join(':')).join('|');
+    if (chipKey !== this.chipKey) {
+      this.chipKey = chipKey;
+      this.status.innerHTML = chips.map(([k, t]) => `<span class="chip ${k}">${t}</span>`).join('');
+    }
+    setText(this.objective, objectiveText(run));
+
     // Champion bar.
     const ch = run.championRef;
     setClass(this.champBar, 'hidden', !ch || ch.dead);
@@ -155,9 +210,17 @@ export class Hud {
   }
 
   drawMinimap(run) {
-    const N = MAP_TILES;
-    const d = this.mimg.data;
     const map = run.map;
+    const N = map.n;
+    if (!this.mimg || this.mimg.width !== N || this.mimgPalette !== map.biome.palette) {
+      this.minimap.width = N;
+      this.minimap.height = N;
+      this.mimg = this.mctx.createImageData(N, N);
+      this.mimgPalette = map.biome.palette;
+      this.mcolors = minimapColors(map.biome.palette);
+    }
+    const MINIMAP_COLORS = this.mcolors;
+    const d = this.mimg.data;
     for (let i = 0; i < N * N; i++) {
       const o = i * 4;
       if (!run.explored[i]) {
@@ -241,7 +304,7 @@ export class Hud {
     }
     const info = RARITY_INFO[item.rarity];
     const lines = itemLines(item).slice(0, 3);
-    let sub = `${info.label} ${item.kind === 'relic' ? 'RELIC' : item.type.toUpperCase()}`;
+    let sub = `${info.label} ${item.kind === 'relic' ? 'RELIC' : item.kind === 'armor' ? item.slot.toUpperCase() : item.type.toUpperCase()}`;
     let right = '';
     if (item.kind === 'weapon' && compare) {
       if (compare.autoEquipped) sub += ' · EQUIPPED';
@@ -250,6 +313,15 @@ export class Hud {
         const cls = pct >= 0 ? 'delta-up' : 'delta-down';
         lines.unshift(`<span class="${cls}">${pct >= 0 ? '+' : ''}${pct}% DPS vs current</span>`);
         right = `<button class="btn btn-small ${pct >= 0 ? 'btn-primary' : ''}" data-equip="${item.uid}">EQUIP</button>`;
+      }
+    } else if (item.kind === 'armor' && compare) {
+      if (compare.autoEquipped) sub += ' · EQUIPPED';
+      else {
+        const da = statOf(item, 'armor') - statOf(compare.current, 'armor');
+        const dh = statOf(item, 'maxHp') - statOf(compare.current, 'maxHp');
+        const fmt = (v, label) => `<span class="${v >= 0 ? 'delta-up' : 'delta-down'}">${v >= 0 ? '+' : ''}${v} ${label}</span>`;
+        lines.unshift(`${fmt(da, 'armor')} · ${fmt(dh, 'HP')} <span>vs worn</span>`);
+        right = `<button class="btn btn-small ${compare.scoreDelta >= 0 ? 'btn-primary' : ''}" data-equip="${item.uid}">EQUIP</button>`;
       }
     } else if (item.kind === 'relic') {
       sub += ' · ACTIVE';

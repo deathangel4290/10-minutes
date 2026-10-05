@@ -1,7 +1,7 @@
 // Offline support: stale-while-revalidate for everything the game loads.
 // After one online visit the whole game (code, fonts) works offline.
 
-const CACHE = 'last10min-v1';
+const CACHE = 'last10min-v2';
 const CORE = ['./', './index.html', './style.css', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './src/main.js'];
 
 self.addEventListener('install', (event) => {

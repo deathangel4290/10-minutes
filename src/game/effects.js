@@ -33,10 +33,22 @@ export class Effects {
     }
   }
 
-  number(x, y, value, color = '#f4f2ff', scale = 1) {
+  /** Floating number. Hits on the same target in quick succession merge into one number. */
+  number(x, y, value, color = '#f4f2ff', scale = 1, key = null) {
     if (!this.showNumbers) return;
+    if (key !== null && typeof value === 'number') {
+      for (const n of this.numbers) {
+        if (n.key === key && n.color === color && n.max - n.life < 0.3) {
+          n.value += value;
+          n.text = String(Math.round(n.value));
+          n.life = n.max;
+          n.scale = Math.max(n.scale, scale);
+          return;
+        }
+      }
+    }
     if (this.numbers.length >= MAX_NUMBERS) this.numbers.shift();
-    this.numbers.push({ x: x + (Math.random() - 0.5) * 6, y, vy: -28 - scale * 6, text: String(value), color, scale, life: 0.7, max: 0.7 });
+    this.numbers.push({ x: x + (Math.random() - 0.5) * 6, y, vy: -28 - scale * 6, text: String(value), value: typeof value === 'number' ? value : 0, key, color, scale, life: 0.7, max: 0.7 });
   }
 
   text(x, y, text, color = '#ffd36b', scale = 1, life = 1.1) {
