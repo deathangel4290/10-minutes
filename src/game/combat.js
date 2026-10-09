@@ -108,6 +108,12 @@ export class Combat {
     if (e.champion) run.stats.champions++;
     const big = e.elite || e.champion;
     run.effects.burst(e.x, e.y - 6, e.def.deathColors, big ? 26 : 12, big ? 90 : 65, 0.55, 60);
+    // What it leaves behind: burned foes leave scorch, the rest their own remains.
+    const mark = e.burnT > 0 ? 'scorch' : e.def.decal;
+    if (mark) {
+      run.effects.decal(e.x, e.y - 1, mark);
+      if (big) for (let i = 0; i < (e.champion ? 4 : 2); i++) run.effects.decal(e.x + (Math.random() - 0.5) * 16, e.y + (Math.random() - 0.5) * 8, mark);
+    }
     run.hooks.sfx(big ? 'eliteDie' : 'die');
     if (big) {
       run.hooks.shake(e.champion ? 9 : 4);
@@ -280,6 +286,7 @@ export class Combat {
       }
       const lava = r.color === 'orange';
       run.effects.ring(r.x, r.y, r.radius, lava ? '#ff9a3c' : '#b68cff', 0.35, 2);
+      run.effects.decal(r.x, r.y, lava ? 'scorch' : 'ash');
       run.effects.burst(r.x, r.y - 2, lava ? ['#ff9a3c', '#ffd36b', '#c2410c'] : ['#b68cff', '#7a3fc0', '#f4f2ff'], 14, 70, 0.45, lava ? 60 : 0);
       run.hooks.sfx(lava ? 'explode' : 'runeBlast');
       if (!pl.dead && (pl.x - r.x) ** 2 + (pl.y - r.y) ** 2 < (r.radius + pl.radius) ** 2) {
@@ -323,6 +330,7 @@ export class Combat {
       this.pendingExplosions = [];
       for (const ex of list.slice(0, 6)) {
         this.shockwave(ex.x, ex.y, 26, ex.dmg, { source: 'explode', noProc: true, knock: 80, color: '#ff9a3c' });
+        run.effects.decal(ex.x, ex.y + 3, 'scorch');
         run.hooks.sfx('explode');
       }
     }

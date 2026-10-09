@@ -82,6 +82,122 @@ function bundle(canvas) {
   return { r: canvas, l: flipH(canvas), flashR: silhouette(canvas), flashL: silhouette(flipH(canvas)), w: canvas.width, h: canvas.height };
 }
 
+// Which art character marks an enemy's eyes, and the glow for slime eyes.
+const EYE_CHAR = { slime: '7', slimeling: '7' };
+const SLIME_EYE = '#d4ff9a';
+
+function findPixels(rows, ch) {
+  const out = [];
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) if (row[x] === ch) out.push([x, y]);
+  });
+  return out;
+}
+
+const BAYER4 = [
+  [0, 8, 2, 10],
+  [12, 4, 14, 6],
+  [3, 11, 1, 9],
+  [15, 7, 13, 5],
+];
+
+/** A round light pool in 4 dithered bands (white with alpha, used to cut darkness). */
+function makeLightPool(r) {
+  const size = r * 2;
+  const c = makeCanvas(size, size);
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  const bands = 4;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const d = Math.hypot(x + 0.5 - r, y + 0.5 - r) / r;
+      if (d >= 1) continue;
+      // Bright core, then a falloff toward the rim.
+      const v = d < 0.35 ? 1 : 1 - (d - 0.35) / 0.65;
+      const lv = Math.max(0, v) * bands;
+      let level = Math.floor(lv);
+      if (lv - level > (BAYER4[y & 3][x & 3] + 0.5) / 16) level++;
+      const o = (y * size + x) * 4;
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
+      img.data[o + 3] = Math.round((Math.min(bands, level) / bands) * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/** Blob-shaped splat for decals: a rough disc plus a few droplets. */
+function splat(rng, w, h, colors, droplets = 3, rough = 0.7) {
+  const c = makeCanvas(w, h);
+  const ctx = c.getContext('2d');
+  const cx = w / 2;
+  const cy = h / 2;
+  const rx = w / 2 - 1.5;
+  const ry = h / 2 - 1.2;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const d = Math.hypot((x + 0.5 - cx) / rx, (y + 0.5 - cy) / ry);
+      if (d > 1 + rng.range(-rough, rough) * 0.35) continue;
+      ctx.fillStyle = d < 0.45 && rng.chance(0.6) ? colors[1] : colors[0];
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  for (let i = 0; i < droplets; i++) {
+    const a = rng.range(0, Math.PI * 2);
+    ctx.fillStyle = colors[0];
+    ctx.fillRect(Math.round(cx + Math.cos(a) * (rx + 1)), Math.round(cy + Math.sin(a) * (ry + 1)), 1, 1);
+  }
+  return c;
+}
+
+/** Marks left on the ground: blood, slime, bones, ash, scorch and footprints. */
+function makeDecals(rng) {
+  const D = {};
+  D.blood = Array.from({ length: 4 }, () => splat(rng, rng.int(7, 10), rng.int(5, 7), ['#4a0f18', '#6e1823'], rng.int(2, 4)));
+  D.slime = Array.from({ length: 4 }, () => splat(rng, rng.int(8, 11), rng.int(5, 7), ['#2a4a26', '#3f6f34'], rng.int(1, 3)));
+  D.ash = Array.from({ length: 4 }, () => splat(rng, rng.int(7, 10), rng.int(5, 7), ['#1c1226', '#33204a'], rng.int(2, 4)));
+  D.scorch = Array.from({ length: 4 }, () => {
+    const c = splat(rng, rng.int(14, 18), rng.int(9, 12), ['#120e16', '#1c1418'], rng.int(3, 6), 1);
+    const ctx = c.getContext('2d');
+    for (let i = 0; i < 2; i++) {
+      ctx.fillStyle = '#5a2410';
+      ctx.fillRect(rng.int(4, c.width - 5), rng.int(3, c.height - 4), 1, 1);
+    }
+    return c;
+  });
+  D.bones = Array.from({ length: 4 }, () => {
+    const c = makeCanvas(12, 8);
+    const ctx = c.getContext('2d');
+    const bone = '#8f8a78';
+    // A small skull...
+    const sx = rng.int(1, 7);
+    const sy = rng.int(1, 4);
+    ctx.fillStyle = '#b9b3a0';
+    ctx.fillRect(sx, sy, 3, 2);
+    ctx.fillRect(sx + 1, sy + 2, 1, 1);
+    ctx.fillStyle = '#2a2433';
+    ctx.fillRect(sx, sy + 1, 1, 1);
+    ctx.fillRect(sx + 2, sy + 1, 1, 1);
+    // ...and a couple of scattered bones.
+    for (let i = 0; i < 2; i++) {
+      ctx.fillStyle = bone;
+      const bx = rng.int(0, 8);
+      const by = rng.int(0, 7);
+      if (rng.chance(0.5)) ctx.fillRect(bx, by, 4, 1);
+      else ctx.fillRect(bx + 1, by - 1 < 0 ? 0 : by - 1, 1, 3);
+    }
+    return c;
+  });
+  D.step = [0, 1].map((side) => {
+    const c = makeCanvas(2, 3);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#7f8ea8';
+    ctx.fillRect(0, side, 2, 2);
+    return c;
+  });
+  return D;
+}
+
 const ELITE_SWAP = {
   w: '#9c86c9', W: '#6a4f9a', R: '#ff9a3c', // skeleton bone -> violet, eyes orange
   l: '#a35fe0', L: '#d7a8ff', G: '#5a2a8a', g: '#2c1145', // slime -> violet
@@ -454,6 +570,8 @@ export function buildSprites() {
   };
 
   // Enemy frames are baked lazily per (sprite, skin, elite) combination.
+  // Each frame also knows where its eyes are, so they can glow in the dark,
+  // and elites/champions get a colored outline so they read at a glance.
   const enemyCache = new Map();
   S.enemyFrames = (sprite, skin = null, elite = false) => {
     const key = `${sprite}|${skin}|${elite}`;
@@ -462,7 +580,12 @@ export function buildSprites() {
     const names = ENEMY_FRAMES[sprite] || ENEMY_FRAMES.skeleton;
     let swap = skin ? ENEMY_SKINS[skin] : null;
     if (elite) swap = { ...(swap || {}), ...ELITE_SWAP };
-    frames = names.map((n) => bundle(bake(ART[n], swap)));
+    const eyeChar = EYE_CHAR[sprite] || 'R';
+    const eyeColor = eyeChar === 'R' ? (swap && swap.R) || PAL.R : SLIME_EYE;
+    frames = names.map((n) => ({ ...bundle(bake(ART[n], swap)), eyes: findPixels(ART[n], eyeChar) }));
+    frames.eyeColor = eyeColor;
+    const outlineColor = skin === 'champion' ? '#ff4a3a' : elite ? '#ffab40' : null;
+    if (outlineColor) for (const f of frames) [f.outR, f.outL] = [outline(f.r, outlineColor), outline(f.l, outlineColor)];
     enemyCache.set(key, frames);
     return frames;
   };
@@ -533,16 +656,20 @@ export function buildSprites() {
   };
   S.bushes = Array.from({ length: 4 }, () => makeBush(rng));
 
-  // Soft light texture used by the lighting pass.
-  const L = makeCanvas(64, 64);
-  const lctx = L.getContext('2d');
-  const grad = lctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.55, 'rgba(255,255,255,0.75)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  lctx.fillStyle = grad;
-  lctx.fillRect(0, 0, 64, 64);
-  S.light = L;
+  // Light pools for the lighting pass, drawn the pixel-art way: a few flat
+  // bands with ordered dithering between them instead of a smooth blur.
+  // Baked per (even) radius at 1:1 so the dither stays crisp.
+  const lightCache = new Map();
+  S.lightAt = (radius) => {
+    const r = Math.max(4, Math.round(radius / 2) * 2);
+    let c = lightCache.get(r);
+    if (!c) {
+      c = makeLightPool(r);
+      lightCache.set(r, c);
+    }
+    return c;
+  };
+  S.decals = makeDecals(new RNG(4040));
 
   S.glow = {};
   for (const [name, color] of Object.entries({ purple: '182,140,255', orange: '255,154,60', red: '224,56,74', blue: '90,166,255', green: '127,214,90', white: '244,242,255', gold: '255,211,107' })) {

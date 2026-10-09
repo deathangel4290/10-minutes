@@ -29,6 +29,7 @@ export class Renderer {
     this.bg = null;
     this.bgFor = null;
     this.drawList = [];
+    this.eyes = []; // enemy eyes to light up after the darkness pass
     this.time = 0;
     this.shadows = {};
   }
@@ -115,13 +116,17 @@ export class Renderer {
     ctx.translate(-cx, -cy);
 
     this.drawGroundLayer(run);
+    this.drawDecals(run);
+    this.eyes.length = 0;
     this.collectDrawables(run);
     for (const d of this.drawList) this.drawItem(run, d);
     this.drawEffects(run);
     ctx.restore();
 
-    if (this.quality) this.drawLighting(run, cx, cy);
-    else this.drawVignette();
+    if (this.quality) {
+      this.drawLighting(run, cx, cy);
+      this.drawEyes(run, cx, cy);
+    } else this.drawVignette();
 
     ctx.save();
     ctx.translate(-cx, -cy);
@@ -505,9 +510,15 @@ export class Renderer {
 
     const x = Math.round(e.x);
     const y = Math.round(e.y);
-    // Spawn: rise out of the ground.
+    // Spawn: rise out of the ground (fade in while growing up from a squashed start).
     let alpha = 1;
-    if (e.spawnT > 0) alpha = clamp(1 - e.spawnT / 0.35, 0, 1);
+    if (e.spawnT > 0) {
+      const t = clamp(1 - e.spawnT / 0.35, 0, 1);
+      alpha = t;
+      h = Math.max(2, Math.round(h * (0.35 + 0.65 * t)));
+      w = Math.round(w * (1.25 - 0.25 * t));
+      if (Math.random() < 0.4) run.effects.particle(x + (Math.random() - 0.5) * w, y, (Math.random() - 0.5) * 20, -10, 0.35, '#3a3350', 1, 30, 1);
+    }
     ctx.globalAlpha = alpha;
     ctx.drawImage(this.shadow(Math.round(e.radius * scale * 0.9 + 2)), x - Math.round(e.radius * scale * 0.9 + 3), y - 3);
     if (e.elite || e.cursed) {
@@ -516,8 +527,15 @@ export class Renderer {
       ctx.drawImage(S.glow[e.champion ? 'red' : 'purple'], x - gs / 2, y - h / 2 - gs / 2 - 2, gs, gs);
       ctx.globalAlpha = alpha;
     }
-    ctx.drawImage(img, Math.round(x - w / 2), Math.round(y - h + 1 + yOff), w, h);
+    const ox = Math.round(x - w / 2);
+    const oy = Math.round(y - h + 1 + yOff);
+    const sx = w / b.w;
+    const sy = h / b.h;
+    const out = !flashing && (e.facing < 0 ? b.outL : b.outR);
+    if (out) ctx.drawImage(out, ox - sx, oy - sy, w + 2 * sx, h + 2 * sy);
+    else ctx.drawImage(img, ox, oy, w, h);
     ctx.globalAlpha = 1;
+    if (b.eyes.length && !flashing) this.eyes.push({ e, b, ox, oy, sx, sy, color: e.champion ? '#ff4a3a' : frames.eyeColor, alpha });
 
     if (e.elite && !e.champion && Math.random() < 0.12) run.effects.particle(x + (Math.random() - 0.5) * w, y - Math.random() * h, 0, -12, 0.5, '#b68cff', 1, 0, 0.5);
 
@@ -741,6 +759,53 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  /** Lasting marks on the ground (bones, blood, scorch, footprints), fading out at the end. */
+  drawDecals(run) {
+    const ctx = this.ctx;
+    const D = this.S.decals;
+    for (const d of run.effects.decals) {
+      if (!this.inView(d.x, d.y, 12)) continue;
+      const set = D[d.kind];
+      if (!set) continue;
+      const img = set[d.variant % set.length];
+      ctx.globalAlpha = Math.min(1, d.life / 8) * (d.kind === 'step' ? 0.55 : 0.8);
+      ctx.drawImage(img, d.x - (img.width >> 1), d.y - (img.height >> 1));
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Enemy eyes glow through the darkness, so you can see what's out there
+   * before it reaches your light.
+   */
+  drawEyes(run, cx, cy) {
+    const ctx = this.ctx;
+    const p = run.player;
+    const lr = p.stats.lightRadius;
+    const dark = clamp((run.phase.darkness + (run.biome ? run.biome.darkness : 0)) * 1.8, 0, 1);
+    if (dark <= 0) return;
+    for (const it of this.eyes) {
+      const e = it.e;
+      const d = Math.hypot(e.x - p.x, e.y - p.y);
+      const a = clamp((d - lr * 0.45) / (lr * 0.4), 0, 1) * dark * it.alpha;
+      if (a < 0.05) continue;
+      if (Math.sin(this.time * 0.9 + e.id * 7.31) > 0.985) continue; // an occasional blink
+      ctx.fillStyle = it.color;
+      const flip = e.facing < 0;
+      const pw = Math.max(1, Math.round(it.sx));
+      const ph = Math.max(1, Math.round(it.sy));
+      for (const [ex, ey] of it.b.eyes) {
+        const px = Math.round(it.ox + (flip ? it.b.w - 1 - ex : ex) * it.sx - cx);
+        const py = Math.round(it.oy + ey * it.sy - cy);
+        ctx.globalAlpha = a * 0.22; // faint halo
+        ctx.fillRect(px - 1, py - 1, pw + 2, ph + 2);
+        ctx.globalAlpha = a;
+        ctx.fillRect(px, py, pw, ph);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   drawLighting(run, cx, cy) {
     const lctx = this.lctx;
     const S = this.S;
@@ -759,7 +824,8 @@ export class Renderer {
       const sy = y - cy;
       if (sx < -r || sy < -r || sx > W + r || sy > H + r) return;
       lctx.globalAlpha = a;
-      lctx.drawImage(S.light, sx - r, sy - r, r * 2, r * 2);
+      const img = S.lightAt(r);
+      lctx.drawImage(img, Math.round(sx - img.width / 2), Math.round(sy - img.height / 2));
     };
     const flick = 0.92 + Math.sin(this.time * 13) * 0.04 + Math.sin(this.time * 7.3) * 0.04;
     light(p.x, p.y - 6, p.stats.lightRadius * (run.timeLeft <= 60 ? 0.9 : 1), 1);

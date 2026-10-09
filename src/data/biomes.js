@@ -38,6 +38,7 @@ export const BIOMES = {
     palette: 'snow',
     skin: 'frost',
     particles: 'snow',
+    footprints: true,
     hazard: 'frost',
     darkness: -0.06,
     difficulty: 1.2,

@@ -132,6 +132,17 @@ export class Run {
 
     this.player.update(dt, input);
     this.hazards.update(dt);
+    // Footprints in the snow.
+    if (this.biome.footprints && this.player.moving && !this.player.dead) {
+      this.stepDist = (this.stepDist || 0) + this.player.stats.moveSpeed * dt;
+      if (this.stepDist > 7) {
+        this.stepDist = 0;
+        this.stepSide = 1 - (this.stepSide || 0);
+        const a = this.player.moveAngle + Math.PI / 2;
+        const off = this.stepSide ? 1.5 : -1.5;
+        this.effects.decal(this.player.x + Math.cos(a) * off, this.player.y + Math.sin(a) * off, 'step', this.stepSide);
+      }
+    }
     this.updateEnemies(dt);
     this.combat.update(dt);
     this.pickups.update(dt);

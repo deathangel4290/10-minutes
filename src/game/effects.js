@@ -3,6 +3,9 @@
 
 const MAX_PARTICLES = 420;
 const MAX_NUMBERS = 60;
+const MAX_DECALS = 260;
+// How long each kind of ground mark lasts (seconds); they fade out at the end.
+const DECAL_LIFE = { step: 9, scorch: 40 };
 
 export class Effects {
   constructor() {
@@ -15,6 +18,7 @@ export class Effects {
     this.texts = [];
     this.afterimages = [];
     this.telegraphs = [];
+    this.decals = []; // lasting marks on the ground: bones, blood, scorch, footprints
     this.quality = 1; // 0 = low, 1 = high
     this.showNumbers = true;
   }
@@ -71,6 +75,14 @@ export class Effects {
     this.beams.push({ x, y, color, life, max: life });
   }
 
+  /** Leave a mark on the ground. It stays for a while, then fades. */
+  decal(x, y, kind, variant = Math.floor(Math.random() * 4)) {
+    const cap = this.quality ? MAX_DECALS : 80;
+    if (this.decals.length >= cap) this.decals.shift();
+    const life = DECAL_LIFE[kind] || 50;
+    this.decals.push({ x: Math.round(x), y: Math.round(y), kind, variant, life, max: life });
+  }
+
   afterimage(x, y, sprite, flip) {
     this.afterimages.push({ x, y, sprite, flip, life: 0.22, max: 0.22 });
   }
@@ -107,5 +119,6 @@ export class Effects {
     step(this.bolts);
     step(this.beams);
     step(this.afterimages);
+    step(this.decals);
   }
 }
