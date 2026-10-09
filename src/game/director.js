@@ -96,7 +96,7 @@ export class Director {
 
     // Lazy camp guards.
     for (const poi of run.pois) {
-      if ((poi.type === 'camp' || poi.type === 'treasureGuard') && !poi.spawned) {
+      if ((poi.type === 'camp' || poi.type === 'treasureGuard' || poi.type === 'landmarkGuard') && !poi.spawned) {
         if ((poi.x - pl.x) ** 2 + (poi.y - pl.y) ** 2 < 170 * 170) this.spawnGuards(poi);
       }
     }
@@ -182,10 +182,11 @@ export class Director {
     const run = this.run;
     poi.spawned = true;
     const treasure = poi.type === 'treasureGuard';
-    const n = treasure ? 6 : run.rng.int(3, 5);
+    const landmark = poi.type === 'landmarkGuard';
+    const n = treasure ? 6 : landmark ? 4 : run.rng.int(3, 5);
     for (let i = 0; i < n; i++) {
       const type = run.rng.weightedKey(treasure ? { skeleton: 3, wolf: 2, archer: 1.5 } : this.currentMix());
-      const elite = treasure ? i < 2 : i === 0 && run.rng.chance(0.25 + run.phase.eliteChance);
+      const elite = treasure ? i < 2 : landmark ? i === 0 : i === 0 && run.rng.chance(0.25 + run.phase.eliteChance);
       this.spawnNear(type, poi.x, poi.y, 6, treasure ? 40 : 34, { elite, guard: true, cursed: !!run.map.inCursedZone(poi.x, poi.y) });
     }
   }

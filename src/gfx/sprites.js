@@ -624,6 +624,8 @@ export function buildSprites() {
   S.pillar = bake(ART.pillar);
   S.pillarBroken = bake(ART.pillar_broken);
   S.torch = bake(ART.torch);
+  S.brazier = bake(ART.brazier);
+  S.brazierOut = bake(ART.brazier_out);
 
   S.weapons = {};
   for (const [id, def] of Object.entries(WEAPON_ART)) {

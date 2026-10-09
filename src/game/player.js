@@ -258,6 +258,8 @@ export class Player {
         if (res.crit) crits++;
       }
     }
+    const smashed = run.combat.hitBraziers(ox, oy, s.range, this.aimAngle, s.arc);
+    if (smashed > 0 && hits === 0) run.hooks.shake(1.5);
     if (hits > 0) {
       this.energy = Math.min(PLAYER_BASE.energyMax, this.energy + s.energyGain * Math.min(hits, 4));
       run.hooks.hitstop(crits > 0 ? 0.06 : 0.035);

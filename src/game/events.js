@@ -26,7 +26,13 @@ export class Events {
     if (pl.dead) return;
     for (const poi of run.pois) {
       const d2 = (poi.x - pl.x) ** 2 + (poi.y - pl.y) ** 2;
-      if (!poi.discovered && d2 < 110 * 110) poi.discovered = true;
+      if (!poi.discovered && d2 < 110 * 110) {
+        poi.discovered = true;
+        if (poi.type === 'landmark') {
+          run.hooks.toast(`Discovered: ${poi.name}`, 'gold');
+          run.hooks.sfx('discover');
+        }
+      }
       if (poi.radius <= 0) continue;
       const inside = d2 < (poi.radius + pl.radius) ** 2;
       if (!inside) {

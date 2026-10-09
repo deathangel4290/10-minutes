@@ -313,28 +313,35 @@ export class Screens {
     const haul = run.haul();
     const items = [...haul].sort((a, b) => RARITY_INFO[b.rarity].tier - RARITY_INFO[a.rarity].tier);
     const strip = items.slice(0, 14).map((it) => `<div class="item-chip r-${it.rarity}"><img src="${itemIconURL(it, 3)}" alt=""></div>`).join('');
-    const est = run.estimateEmbers();
+    const gate = run.modal && run.modal.poi;
+    const toll = gate && gate.toll ? run.tollPrice() : 0;
+    const canPay = run.gold >= toll;
+    const est = run.estimateEmbers(Math.max(0, run.gold - toll));
     const phase = phaseForTimeLeft(run.timeLeft);
     const next = PHASES[phase.id + 1];
     let risk;
     if (run.timeLeft <= 60) risk = 'The last minute: the richest loot, the deadliest dark. One wrong step and you lose it all.';
     else if (next) risk = `Stay: loot quality rises in ${formatTime(run.timeLeft - phase.until)} (${next.name.toLowerCase()}). Escaping later also pays more Embers.`;
     else risk = 'Rare loot is everywhere now — and so is death. Every second you stay pays more.';
-    const otherGates = run.pois.filter((g) => g.type === 'gate' && g.open).length;
+    const otherGates = run.pois.filter((g) => g.type === 'gate' && g.open && !g.toll).length;
     this.showModal(`<div class="panel split">
       <div class="col-a">
-      <h2 class="modal-title" style="color:var(--purple-hi)">ESCAPE?</h2>
-      <p class="modal-sub">Keep your loot and end the run.</p>
+      <h2 class="modal-title" style="color:${toll ? 'var(--orange-hi)' : 'var(--purple-hi)'}">${toll ? 'TOLL GATE' : 'ESCAPE?'}</h2>
+      <p class="modal-sub">${toll ? 'This gate never collapses, but it keeps 40% of the gold you carry.' : 'Keep your loot and end the run.'}</p>
       <div class="haul">
-        <div class="cell"><div class="v" style="color:var(--orange-hi)">${formatInt(run.gold)}</div><div class="k">GOLD</div></div>
+        <div class="cell"><div class="v" style="color:var(--orange-hi)">${formatInt(Math.max(0, run.gold - toll))}</div><div class="k">${toll ? 'GOLD AFTER TOLL' : 'GOLD'}</div></div>
         <div class="cell"><div class="v">${items.length}</div><div class="k">ITEMS</div></div>
         <div class="cell"><div class="v" style="color:var(--orange-hi)">~${formatInt(est)}</div><div class="k">EMBERS</div></div>
       </div>
       ${strip ? `<div class="item-strip">${strip}</div>` : ''}
-      <div class="risk-note">${esc(risk)}${otherGates <= 1 && run.timeLeft > 0 ? ' This is the last open gate.' : ''}</div>
+      <div class="risk-note">${esc(risk)}${!toll && otherGates <= 1 && run.timeLeft > 0 ? ' This is the last free gate.' : ''}</div>
       </div>
       <div class="col-b"><div class="btn-row">
-        <button class="btn btn-primary" data-action="escape">ESCAPE<span class="sub">Secure everything</span></button>
+        ${
+          toll
+            ? `<button class="btn btn-gold" data-action="escape" ${canPay ? '' : 'disabled'}>PAY ${formatInt(toll)} GOLD<span class="sub">${canPay ? 'Escape with everything else' : `You need ${formatInt(toll)} gold`}</span></button>`
+            : '<button class="btn btn-primary" data-action="escape">ESCAPE<span class="sub">Secure everything</span></button>'
+        }
         <button class="btn" data-action="closeModal">KEEP EXPLORING<span class="sub">${formatTime(run.timeLeft)} left on the clock</span></button>
       </div></div>
     </div>`);

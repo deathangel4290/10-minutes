@@ -28,7 +28,10 @@ test('every region generates a connected map with its own terrain', () => {
       const m = new GameMap(seed * 131, BIOMES[id]);
       assert.equal(m.n, BIOMES[id].size);
       for (const p of m.pois) assert.ok(m.isOpenReachable(p.x, p.y), `${id}: ${p.type} unreachable (seed ${seed})`);
-      assert.equal(m.pois.filter((p) => p.type === 'gate').length, 3);
+      assert.equal(m.pois.filter((p) => p.type === 'gate' && !p.toll).length, 3);
+      assert.equal(m.pois.filter((p) => p.type === 'gate' && p.toll).length, 1, 'one toll gate');
+      assert.equal(m.landmarks.length, 2, `${id}: both set pieces placed (seed ${seed})`);
+      for (const b of m.pois.filter((p) => p.type === 'brazier')) assert.ok(m.isOpenReachable(b.x, b.y - 4), `${id}: brazier reachable`);
       const has = (t) => m.tiles.includes(t);
       if (id === 'volcano') assert.ok(has(T.LAVA), 'the caldera has lava');
       else assert.ok(!has(T.LAVA));
@@ -157,4 +160,43 @@ test('the town is walkable and its vendors open shops', () => {
   town.update(1 / 60, idle);
   assert.equal(opened && opened.kind, 'vendor');
   assert.equal(opened.vendor, v.shop);
+});
+
+test('landmark templates are rectangular and orient cleanly', async () => {
+  const { LANDMARKS, orient } = await import('../src/data/landmarks.js');
+  for (const [region, list] of Object.entries(LANDMARKS)) {
+    for (const lm of list) {
+      const w = lm.rows[0].length;
+      for (const r of lm.rows) assert.equal(r.length, w, `${region}/${lm.id} rows must be the same width`);
+      const t = orient(lm.rows, { transpose: true, flipX: true });
+      assert.equal(t.length, w);
+      assert.equal(t[0].length, lm.rows.length);
+      assert.ok(lm.rows.join('').includes('C'), `${region}/${lm.id} has a chest`);
+    }
+  }
+});
+
+test('smashing a brazier puts it out and drops loot', () => {
+  const run = new Run({ seed: 21 });
+  const b = run.pois.find((p) => p.type === 'brazier');
+  assert.ok(b, 'the map has braziers');
+  const before = run.pickups.list.length;
+  assert.equal(run.combat.hitBraziers(b.x, b.y - 6, 20), 1);
+  assert.equal(b.lit, false);
+  assert.ok(run.pickups.list.length > before, 'loot dropped');
+  assert.equal(run.combat.hitBraziers(b.x, b.y - 6, 20), 0, 'an unlit brazier cannot break again');
+});
+
+test('the toll gate takes 40% of your gold, and refuses you if you are short', () => {
+  const run = new Run({ seed: 23 });
+  const toll = run.pois.find((p) => p.type === 'gate' && p.toll);
+  run.gold = 10;
+  run.modal = { kind: 'escape', poi: toll };
+  run.escape();
+  assert.ok(!run.ended, 'not enough gold');
+  run.gold = 500;
+  run.modal = { kind: 'escape', poi: toll };
+  run.escape();
+  assert.ok(run.ended);
+  assert.equal(run.gold, 300);
 });

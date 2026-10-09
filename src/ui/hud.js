@@ -38,8 +38,9 @@ function objectiveText(run) {
   const p = run.player;
   let best = null;
   let bd = Infinity;
+  const free = run.pois.some((g) => g.type === 'gate' && g.open && !g.toll);
   for (const g of run.pois) {
-    if (g.type !== 'gate' || !g.open) continue;
+    if (g.type !== 'gate' || !g.open || (g.toll && free)) continue;
     const d = Math.hypot(g.x - p.x, g.y - p.y);
     if (d < bd) {
       bd = d;
@@ -50,8 +51,9 @@ function objectiveText(run) {
   const meters = Math.round(bd / 8);
   const closing = run.pois.find((g) => g.type === 'gate' && g.open && g.closing);
   if (closing) return `A GATE CLOSES IN ${Math.max(0, Math.ceil(run.timeLeft - closing.closesAt))}S`;
-  if (run.timeLeft <= 60) return `ESCAPE! GATE ${meters}M`;
-  return `GATE ${meters}M \u00b7 LOOT, THEN LEAVE`;
+  const gate = best.toll ? 'TOLL GATE' : 'GATE';
+  if (run.timeLeft <= 60) return `ESCAPE! ${gate} ${meters}M`;
+  return `${gate} ${meters}M \u00b7 LOOT, THEN LEAVE`;
 }
 
 function statOf(item, stat) {
@@ -251,12 +253,13 @@ export class Hud {
       ctx.fill();
     }
     for (const poi of run.pois) {
-      if (poi.type === 'gate') dot(poi.x, poi.y, poi.open ? (poi.closing && blink ? '#ff5a5a' : '#c48cff') : '#3a3350', 4);
+      if (poi.type === 'gate') dot(poi.x, poi.y, !poi.open ? '#3a3350' : poi.closing && blink ? '#ff5a5a' : poi.toll ? '#ffd36b' : '#c48cff', 4);
       else if (!poi.discovered) continue;
       else if (poi.type === 'chest' && !poi.opened) dot(poi.x, poi.y, RARITY_INFO[poi.rarity].color, 2);
       else if (poi.type === 'shrine' && !poi.used) dot(poi.x, poi.y, '#e0384a', 2);
       else if (poi.type === 'mystery' && !poi.used) dot(poi.x, poi.y, '#b68cff', 2);
       else if (poi.type === 'merchant') dot(poi.x, poi.y, blink ? '#ffd36b' : '#c2561f', 3);
+      else if (poi.type === 'landmark') dot(poi.x, poi.y, '#e6c8a6', 3);
     }
     if (run.championRef && !run.championRef.dead && blink) dot(run.championRef.x, run.championRef.y, '#ff3a3a', 3);
     dot(run.player.x, run.player.y, blink ? '#ffffff' : '#ffd36b', 3);

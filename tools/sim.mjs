@@ -99,7 +99,7 @@ function botInput(run) {
       target = e;
     }
   }
-  const gate = run.pois.filter((g) => g.type === 'gate' && g.open).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+  const gate = run.pois.filter((g) => g.type === 'gate' && g.open && (!g.toll || run.gold >= run.tollPrice())).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
   const goHome = run.timeLeft < 75 && gate;
   let gx = 0;
   let gy = 0;
@@ -192,7 +192,7 @@ const PRIORITY = ['sharpen', 'frenzy', 'vitality', 'ironskin', 'bloodthirst', 'k
 // The "turtle": stands still, swings at whatever comes, and builds pure sustain.
 function turtleInput(run) {
   const p = run.player;
-  const gate = run.pois.filter((g) => g.type === 'gate' && g.open).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+  const gate = run.pois.filter((g) => g.type === 'gate' && g.open && (!g.toll || run.gold >= run.tollPrice())).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
   if (run.timeLeft < 70 && gate) {
     const st = pathStep(run, gate);
     const l = Math.hypot(st.x, st.y) || 1;

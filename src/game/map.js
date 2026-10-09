@@ -4,6 +4,7 @@
 
 import { TILE, GATE_CLOSE_TIMES } from '../data/config.js';
 import { BIOMES } from '../data/biomes.js';
+import { LANDMARKS, orient } from '../data/landmarks.js';
 import { RNG } from '../core/rng.js';
 import { makeFractalNoise, makeNoise } from '../core/noise.js';
 import { TAU, clamp } from '../core/math.js';
@@ -37,6 +38,8 @@ export class GameMap {
     this.pois = [];
     this.cursedZones = [];
     this.spikes = [];
+    this.landmarks = [];
+    this.landmarkMask = new Uint8Array(this.n * this.n); // paths never carve through set pieces
     this.floorTile = biome.layout === 'rooms' ? T.STONE : T.DIRT;
     const rng = new RNG(seed);
     if (opts.custom) opts.custom(this, rng);
@@ -126,6 +129,21 @@ export class GameMap {
       spots.splice(spots.indexOf(roomSpot), 1);
       this.buildTreasureRoom(rng, roomSpot.tx, roomSpot.ty, clear);
     }
+    // The region's set pieces, away from the start, the gates and the vault.
+    for (const lm of rng.shuffle([...(LANDMARKS[this.biome.id] || [])])) {
+      const spot = spots.find(
+        (s) =>
+          s.tx > 13 && s.tx < N - 14 && s.ty > 13 && s.ty < N - 14 &&
+          (s.tx - cx) ** 2 + (s.ty - cy) ** 2 > 16 * 16 &&
+          gates.every((gt) => (gt.tx - s.tx) ** 2 + (gt.ty - s.ty) ** 2 > 12 * 12) &&
+          (!roomSpot || (roomSpot.tx - s.tx) ** 2 + (roomSpot.ty - s.ty) ** 2 > 16 * 16) &&
+          this.landmarks.every((o) => (o.tx - s.tx) ** 2 + (o.ty - s.ty) ** 2 > 22 * 22),
+      );
+      if (!spot) continue;
+      this.stampLandmark(rng, lm, spot.tx, spot.ty, clear, true);
+      // Keep other points of interest out of the set piece.
+      for (let k = spots.length - 1; k >= 0; k--) if ((spots[k].tx - spot.tx) ** 2 + (spots[k].ty - spot.ty) ** 2 < 9 * 9) spots.splice(k, 1);
+    }
     this.placePois(rng, spots, clear, area);
 
     // Dirt paths from the center to each gate and to a few points of interest.
@@ -184,6 +202,7 @@ export class GameMap {
       }
       if (rng.chance(0.5)) this.decor.push({ kind: 'grave', x: tx * TILE + rng.range(2, 14), y: ty * TILE + 16 + rng.range(4, 12) });
     }
+    this.scatterBraziers(rng, Math.round(9 * area), [T.STONE, T.DIRT]);
   }
 
   // ── Dungeon layout (crypt): rooms joined by corridors ─────
@@ -279,6 +298,16 @@ export class GameMap {
       this.torches.push({ x: c.x * TILE - 12, y: c.y * TILE + 26 }, { x: c.x * TILE + 28, y: c.y * TILE + 26 });
     });
     for (const r of rooms) r.used = gateRooms.includes(r) || r.start;
+    // The Toll Gate sits in a room about halfway out.
+    const midRooms = byDist.filter((r) => !r.used);
+    const tollRoom = midRooms[Math.floor(midRooms.length * 0.6)];
+    if (tollRoom) {
+      tollRoom.used = true;
+      const c = centerOf(tollRoom);
+      this.markClear(clear, c.x, c.y, 2);
+      this.pois.push({ type: 'gate', id: 'toll', toll: true, x: c.x * TILE + TILE / 2, y: c.y * TILE + TILE / 2, closesAt: null, open: true, radius: 12 });
+      this.torches.push({ x: c.x * TILE - 12, y: c.y * TILE + 26 }, { x: c.x * TILE + 28, y: c.y * TILE + 26 });
+    }
 
     // The biggest unused room becomes the treasure vault.
     const vault = rooms.filter((r) => !r.used).sort((a, b) => b.w * b.h - a.w * a.h)[0];
@@ -289,6 +318,17 @@ export class GameMap {
       this.pois.push({ type: 'chest', x: c.x * TILE + TILE / 2, y: c.y * TILE + TILE / 2, rarity: rng.chance(0.25) ? 'legendary' : 'epic', treasure: true, opened: false, radius: 10 });
       this.pois.push({ type: 'treasureGuard', x: c.x * TILE + TILE / 2, y: c.y * TILE + TILE / 2, spawned: false, radius: 0 });
       this.torches.push({ x: vault.x * TILE + 10, y: vault.y * TILE + 14 }, { x: (vault.x + vault.w) * TILE - 10, y: vault.y * TILE + 14 });
+    }
+
+    // Set pieces fill a couple of the remaining rooms.
+    for (const lm of rng.shuffle([...(LANDMARKS[this.biome.id] || [])])) {
+      const th = lm.rows.length;
+      const tw = lm.rows[0].length;
+      const room = rng.shuffle(rooms.filter((r) => !r.used && r.w >= tw + 2 && r.h >= th + 2))[0];
+      if (!room) continue;
+      room.used = true;
+      const c = centerOf(room);
+      this.stampLandmark(rng, lm, c.x, c.y, clear, false);
     }
 
     // Other points of interest go in room interiors.
@@ -309,6 +349,7 @@ export class GameMap {
         if (!clear[this.idx(px, py)] && rng.chance(0.7)) tiles[this.idx(px, py)] = T.PILLAR;
       }
     }
+    this.scatterBraziers(rng, Math.round(rooms.length * 0.35), [T.STONE]);
     // Spikes never sit on points of interest.
     this.spikes = this.spikes.filter((s) => !clear[this.idx(s.tx, s.ty)] && tiles[this.idx(s.tx, s.ty)] === T.STONE);
   }
@@ -327,7 +368,71 @@ export class GameMap {
       this.markClear(clear, tx, ty, 3);
       this.pois.push({ type: 'gate', id: `gate${i}`, x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2, closesAt: closeTimes[i], open: true, radius: 12 });
     }
+    // The Toll Gate: closer than the others and never collapses, but it takes a cut of your gold.
+    const a = base + TAU / 6;
+    const d = rng.range(N * 0.2, N * 0.25);
+    const tx = clamp(Math.round(cx + Math.cos(a) * d), 6, N - 7);
+    const ty = clamp(Math.round(cy + Math.sin(a) * d), 6, N - 7);
+    gates.push({ tx, ty });
+    this.markClear(clear, tx, ty, 3);
+    this.pois.push({ type: 'gate', id: 'toll', toll: true, x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2, closesAt: null, open: true, radius: 12 });
     return gates;
+  }
+
+  /**
+   * Stamp a hand-made set piece (see landmarks.js) centered on a tile, mirrored
+   * and rotated at random. Adds its chest, braziers, campfire, guards and name.
+   */
+  stampLandmark(rng, lm, tx, ty, clear, canRotate) {
+    const rows = orient(lm.rows, { flipX: rng.chance(0.5), flipY: rng.chance(0.5), transpose: canRotate && rng.chance(0.5) });
+    const h = rows.length;
+    const w = rows[0].length;
+    const x0 = tx - Math.floor(w / 2);
+    const y0 = ty - Math.floor(h / 2);
+    const pools = this.biome.gen && this.biome.gen.pools;
+    const pool = pools ? (pools.tile === 'lava' ? T.LAVA : T.ICE) : T.DARK;
+    const ground = this.biome.layout === 'rooms' ? T.STONE : T.GRASS;
+    const at = (x, y) => ({ x: (x0 + x) * TILE + TILE / 2, y: (y0 + y) * TILE + TILE / 2 });
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const ch = rows[y][x];
+        if (ch === ' ') continue;
+        const X = x0 + x;
+        const Y = y0 + y;
+        if (!this.inBounds(X, Y) || this.tiles[this.idx(X, Y)] === T.BORDER) continue;
+        const i = this.idx(X, Y);
+        clear[i] = 1;
+        this.landmarkMask[i] = 1;
+        const tile = { '.': ground, ':': T.DIRT, s: T.STONE, '#': T.WALL, P: T.PILLAR, T: T.TREE, '~': pool, '?': rng.chance(0.5) ? T.WALL : T.STONE }[ch];
+        this.tiles[i] = tile === undefined ? T.STONE : tile;
+        const p = at(x, y);
+        if (ch === 'C') this.pois.push({ type: 'chest', x: p.x, y: p.y, rarity: lm.chest, opened: false, radius: 10, landmark: lm.id });
+        else if (ch === 'F') this.pois.push({ type: 'brazier', x: p.x, y: p.y + 4, lit: true, radius: 0 });
+        else if (ch === 'K') this.pois.push({ type: 'camp', x: p.x, y: p.y, spawned: true, radius: 0 });
+        else if (ch === 'B') this.decor.push({ kind: 'bones', x: p.x + rng.range(-3, 3), y: p.y + rng.range(-3, 3) });
+        else if (ch === 'G') this.decor.push({ kind: 'grave', x: p.x, y: p.y + 6 });
+      }
+    }
+    const c = at(Math.floor(w / 2), Math.floor(h / 2));
+    if (lm.guard) this.pois.push({ type: 'landmarkGuard', x: c.x, y: c.y, spawned: false, radius: 0 });
+    this.pois.push({ type: 'landmark', id: lm.id, name: lm.name, x: c.x, y: c.y, labelY: y0 * TILE + 2, radius: 0 });
+    this.landmarks.push({ id: lm.id, tx, ty, w, h });
+  }
+
+  /** Braziers: light sources you can smash for a little loot (the area goes dark). */
+  scatterBraziers(rng, count, onTiles) {
+    const N = this.n;
+    let placed = 0;
+    for (let k = 0; k < count * 40 && placed < count; k++) {
+      const tx = rng.int(5, N - 6);
+      const ty = rng.int(5, N - 6);
+      if (!onTiles.includes(this.tiles[this.idx(tx, ty)]) || this.landmarkMask[this.idx(tx, ty)]) continue;
+      const x = tx * TILE + TILE / 2;
+      const y = ty * TILE + TILE / 2 + 4;
+      if (this.pois.some((p) => (p.x - x) ** 2 + (p.y - y) ** 2 < 40 * 40)) continue;
+      this.pois.push({ type: 'brazier', x, y, lit: true, radius: 0 });
+      placed++;
+    }
   }
 
   /** Camps, shrines, mysterious chests, ambush sites, a cursed zone and chests, scaled by map area. */
@@ -487,6 +592,7 @@ export class GameMap {
       y = clamp(y, 4, this.n - 5);
       for (const [ox, oy] of horizontal ? [[0, 0], [0, 1]] : [[0, 0], [1, 0]]) {
         const i = this.idx(x + ox, y + oy);
+        if (this.landmarkMask[i]) continue;
         if (this.tiles[i] === T.GRASS || this.tiles[i] === T.DARK || this.tiles[i] === T.ICE || this.tiles[i] === T.LAVA) this.tiles[i] = T.DIRT;
         clear[i] = 1;
       }

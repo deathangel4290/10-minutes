@@ -368,6 +368,23 @@ export class Renderer {
     const x = Math.round(poi.x);
     const y = Math.round(poi.y);
     switch (poi.type) {
+      case 'brazier': {
+        ctx.drawImage(this.shadow(4), x - 5, y - 3);
+        ctx.drawImage(poi.lit ? S.brazier : S.brazierOut, x - 4, y - 9);
+        if (poi.lit) {
+          const flameColors = ['#ffd36b', '#ff9a3c', '#c2561f'];
+          for (let i = 0; i < 5; i++) {
+            const fx = x - 3 + i * 1.5;
+            const hgt = 2 + Math.abs(Math.sin(this.time * 9 + i * 1.7 + x)) * 4;
+            for (let k = 0; k < hgt; k++) {
+              ctx.fillStyle = flameColors[Math.min(2, Math.floor((k / hgt) * 3))];
+              ctx.fillRect(Math.round(fx), Math.round(y - 10 - k), 1, 1);
+            }
+          }
+          if (Math.random() < 0.08) run.effects.particle(x + (Math.random() - 0.5) * 6, y - 14, (Math.random() - 0.5) * 6, -18, 0.8, '#ff9a3c', 1, 0, 0.5);
+        }
+        break;
+      }
       case 'chest': {
         const img = poi.opened ? S.chestOpen[poi.rarity] : S.chest[poi.rarity];
         const glow = RARITY_GLOW[poi.rarity];
@@ -463,7 +480,7 @@ export class Renderer {
     ctx.ellipse(x, cy, 8, 12, 0, 0, Math.PI * 2);
     ctx.fill();
     // Swirling ring.
-    const ring = flicker ? ['#e0384a', '#8e1f2c'] : ['#b68cff', '#7a3fc0', '#f4f2ff'];
+    const ring = flicker ? ['#e0384a', '#8e1f2c'] : poi.toll ? ['#ffd36b', '#c2561f', '#fff1c4'] : ['#b68cff', '#7a3fc0', '#f4f2ff'];
     for (let i = 0; i < 28; i++) {
       const a = this.time * 2.2 + (i / 28) * Math.PI * 2;
       const r = 1 - (i % 3) * 0.12;
@@ -473,10 +490,10 @@ export class Renderer {
     for (let i = 0; i < 8; i++) {
       const a = -this.time * 3 + (i / 8) * Math.PI * 2;
       const r = 3 + Math.sin(this.time * 2 + i) * 2;
-      ctx.fillStyle = '#7a3fc0';
+      ctx.fillStyle = poi.toll ? '#c2561f' : '#7a3fc0';
       ctx.fillRect(Math.round(x + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r * 1.4), 1, 1);
     }
-    if (Math.random() < 0.3) run.effects.particle(x + (Math.random() - 0.5) * 16, cy + (Math.random() - 0.5) * 22, 0, -14, 0.7, '#b68cff', 1, 0, 0.5);
+    if (Math.random() < 0.3) run.effects.particle(x + (Math.random() - 0.5) * 16, cy + (Math.random() - 0.5) * 22, 0, -14, 0.7, poi.toll ? '#ffd36b' : '#b68cff', 1, 0, 0.5);
   }
 
   drawEnemy(run, e) {
@@ -835,6 +852,7 @@ export class Renderer {
       else if (poi.type === 'vendor') light(poi.x, poi.y - 8, 30, 0.8);
       else if (poi.type === 'merchant') light(poi.x, poi.y - 8, 34, 0.9);
       else if (poi.type === 'camp') light(poi.x, poi.y, 40 * flick, 1);
+      else if (poi.type === 'brazier' && poi.lit) light(poi.x, poi.y - 10, 34 * flick, 0.9);
       else if (poi.type === 'chest' && !poi.opened && RARITY_INFO[poi.rarity].tier >= 2) light(poi.x, poi.y - 6, 20, 0.6);
       else if (poi.type === 'shrine' && !poi.used) light(poi.x, poi.y - 12, 24, 0.7);
       else if (poi.type === 'mystery' && !poi.used) light(poi.x, poi.y - 6, 22, 0.7);
@@ -867,7 +885,8 @@ export class Renderer {
     }
     ctx.globalAlpha = 0.25;
     for (const poi of run.pois) {
-      if ((poi.type === 'gate' || poi.type === 'portal') && poi.open) ctx.drawImage(S.glow.purple, poi.x - cx - 26, poi.y - cy - 40, 52, 52);
+      if ((poi.type === 'gate' || poi.type === 'portal') && poi.open) ctx.drawImage(poi.toll ? S.glow.gold : S.glow.purple, poi.x - cx - 26, poi.y - cy - 40, 52, 52);
+      else if (poi.type === 'brazier' && poi.lit) ctx.drawImage(S.glow.orange, poi.x - cx - 18, poi.y - cy - 30, 36, 36);
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
@@ -899,9 +918,13 @@ export class Renderer {
       let color = '#c9c6dc';
       let lift = 20;
       if (poi.type === 'gate') {
-        label = poi.open ? 'RIFT GATE' : 'COLLAPSED';
-        color = poi.open ? '#d7b8ff' : '#6d6588';
+        label = !poi.open ? 'COLLAPSED' : poi.toll ? 'TOLL GATE' : 'RIFT GATE';
+        color = !poi.open ? '#6d6588' : poi.toll ? '#ffd36b' : '#d7b8ff';
         lift = 36;
+      } else if (poi.type === 'landmark') {
+        label = poi.name.toUpperCase();
+        color = '#e6c8a6';
+        lift = Math.min(poi.y - poi.labelY, 48);
       } else if (poi.type === 'chest' && !poi.opened) {
         label = poi.cursed ? 'CURSED CHEST' : poi.treasure ? 'TREASURE' : 'CHEST';
         color = RARITY_INFO[poi.rarity].color;
@@ -958,8 +981,9 @@ export class Renderer {
     const targets = [];
     let gate = null;
     let gd = Infinity;
+    const freeGate = run.pois.some((g) => g.type === 'gate' && g.open && !g.toll);
     for (const poi of run.pois) {
-      if (poi.type === 'gate' && poi.open) {
+      if (poi.type === 'gate' && poi.open && !(poi.toll && freeGate)) {
         const d = (poi.x - p.x) ** 2 + (poi.y - p.y) ** 2;
         if (d < gd) {
           gd = d;

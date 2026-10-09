@@ -3,6 +3,7 @@
 import { ELITE } from '../data/enemies.js';
 import { RUN_DURATION } from '../data/config.js';
 import { CURSED_ZONE } from '../data/events.js';
+import { angleDiff } from '../core/math.js';
 
 const BURN_BASE = 0.35; // burn DPS as a fraction of weapon damage
 const BLEED_BASE = 0.16; // per stack
@@ -219,9 +220,42 @@ export class Combat {
     }
   }
 
+  /**
+   * Smash braziers caught in a swing (aim + arc) or a blast (no aim).
+   * Returns how many broke.
+   */
+  hitBraziers(x, y, range, aim = null, arc = 0) {
+    const run = this.run;
+    let broke = 0;
+    for (const poi of run.pois) {
+      if (poi.type !== 'brazier' || !poi.lit) continue;
+      const dx = poi.x - x;
+      const dy = poi.y - 6 - y;
+      const d = Math.hypot(dx, dy);
+      if (d > range + 5) continue;
+      if (aim !== null && d > 10 && Math.abs(angleDiff(aim, Math.atan2(dy, dx))) > arc / 2) continue;
+      this.breakBrazier(poi);
+      broke++;
+    }
+    return broke;
+  }
+
+  breakBrazier(poi) {
+    const run = this.run;
+    poi.lit = false;
+    run.effects.burst(poi.x, poi.y - 8, ['#ffd36b', '#ff9a3c', '#c2561f', '#5a5374'], 16, 70, 0.6, 60);
+    run.effects.decal(poi.x, poi.y + 1, 'scorch');
+    run.hooks.sfx('brazier');
+    const ph = run.phase.id;
+    run.pickups.dropGold(poi.x, poi.y - 4, run.rng.int(6, 12) + ph * 5);
+    if (run.rng.chance(0.4)) run.pickups.dropXp(poi.x, poi.y - 4, 3 + ph * 2);
+    if (run.rng.chance(0.08)) run.pickups.dropPotion(poi.x, poi.y - 4);
+  }
+
   shockwave(x, y, radius, dmg, opts = {}) {
     const run = this.run;
     run.effects.ring(x, y, radius, opts.color || '#b68cff', 0.35, 2);
+    if (opts.source === 'nova' || opts.source === 'explode') this.hitBraziers(x, y, radius);
     if (run.effects.quality) run.effects.burst(x, y, [opts.color || '#b68cff', '#f4f2ff'], 14, radius * 2.2, 0.35, 0);
     for (const e of run.enemies) {
       if (e.dead) continue;

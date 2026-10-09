@@ -279,6 +279,11 @@ const SFX = {
     a.tone('triangle', 880, 0.2, 0.1, { delay: 0.1 });
     a.tone('triangle', 1320, 0.3, 0.08, { delay: 0.18 });
   },
+  brazier: (a) => {
+    a.noise(0.22, 0.13, { type: 'bandpass', freq: 1800, to: 300, q: 1.4 });
+    a.tone('square', 240, 0.14, 0.05, { to: 120, filter: { freq: 1400 } });
+  },
+  discover: (a) => [392, 523, 659].forEach((f, i) => a.tone('triangle', f, 0.5, 0.06, { delay: i * 0.09, attack: 0.03 })),
   chestBig: (a) => {
     SFX.chest(a);
     [587, 740, 880, 1175].forEach((f, i) => a.tone('triangle', f, 0.5, 0.07, { delay: 0.25 + i * 0.06 }));

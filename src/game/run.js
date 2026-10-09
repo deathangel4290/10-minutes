@@ -22,6 +22,9 @@ import { computeEmbers, computeScore } from './score.js';
 import { RARITY_INFO } from '../data/rarities.js';
 import { formatTime } from '../core/math.js';
 
+const TOLL_SHARE = 0.4;
+const TOLL_MIN = 30;
+
 const NOOP = () => {};
 export const NOOP_HOOKS = {
   sfx: NOOP,
@@ -293,8 +296,19 @@ export class Run {
     return ok;
   }
 
+  /** What the Toll Gate takes: 40% of the gold you carry (at least 30). */
+  tollPrice() {
+    return Math.max(TOLL_MIN, Math.ceil(this.gold * TOLL_SHARE));
+  }
+
   escape() {
     if (this.ended) return;
+    const gate = this.modal && this.modal.poi;
+    if (gate && gate.toll) {
+      const price = this.tollPrice();
+      if (this.gold < price) return;
+      this.gold -= price;
+    }
     this.modal = null;
     this.hooks.closeModal();
     this.pickups.collectAll();
@@ -414,8 +428,8 @@ export class Run {
     return items;
   }
 
-  estimateEmbers() {
-    return computeEmbers({ outcome: 'escaped', gold: this.gold, kills: this.stats.kills, elites: this.stats.elites, champions: this.stats.champions, elapsed: this.elapsed, items: this.haul(), regionMult: this.biome.reward }).total;
+  estimateEmbers(gold = this.gold) {
+    return computeEmbers({ outcome: 'escaped', gold, kills: this.stats.kills, elites: this.stats.elites, champions: this.stats.champions, elapsed: this.elapsed, items: this.haul(), regionMult: this.biome.reward }).total;
   }
 
   // ── Phase / death / end ───────────────────────────────────
