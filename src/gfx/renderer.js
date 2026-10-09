@@ -117,6 +117,7 @@ export class Renderer {
 
     this.drawGroundLayer(run);
     this.drawDecals(run);
+    this.drawSkillZones(run);
     this.eyes.length = 0;
     this.collectDrawables(run);
     for (const d of this.drawList) this.drawItem(run, d);
@@ -595,13 +596,18 @@ export class Renderer {
       ctx.drawImage(this.shadow(4), x - 5, Math.round(pk.y) - 3);
       let img;
       if (item.kind === 'weapon') img = S.weaponIcons[`${item.type}|${item.rarity}`];
-      else if (item.kind === 'relic' || item.kind === 'armor') img = S.icon(item.icon, item.rarity);
+      else if (item.kind === 'relic' || item.kind === 'armor' || item.kind === 'skill') img = S.icon(item.icon, item.rarity);
       else img = S.potion;
       ctx.drawImage(img, x - Math.floor(img.width / 2), y - img.height - 2 + bob);
     }
   }
 
   drawPlayer(run, p) {
+    if (p.sprintT > 0 && Math.random() < 0.6) run.effects.particle(p.x + (Math.random() - 0.5) * 8, p.y - 2, (Math.random() - 0.5) * 10, -20, 0.35, Math.random() < 0.5 ? '#ff9a3c' : '#ffd36b', 1, -10, 1);
+    if (p.stormCharged && Math.random() < 0.5) {
+      const a = Math.random() * Math.PI * 2;
+      run.effects.particle(p.x + Math.cos(a) * 7, p.y - 8 + Math.sin(a) * 9, 0, 0, 0.18, Math.random() < 0.5 ? '#8fd3ff' : '#f4f2ff', 1, 0, 0);
+    }
     const ctx = this.ctx;
     const S = this.S;
     const x = Math.round(p.x);
@@ -722,16 +728,24 @@ export class Renderer {
       ctx.fillStyle = '#ff5a5a';
       ctx.fillRect(Math.round(pr.x), Math.round(pr.y), 1, 1);
     }
-    // Shadow-wave projectiles.
+    // Shadow waves (crescents) and spectral bolts.
     for (const pr of run.combat.projectiles) {
-      ctx.fillStyle = '#b68cff';
-      for (let i = -4; i <= 4; i++) {
+      if (pr.kind === 'spectral') {
+        ctx.fillStyle = '#c4e4f5';
+        for (let i = 0; i < 6; i++) ctx.fillRect(Math.round(pr.x - Math.cos(pr.angle) * i), Math.round(pr.y - Math.sin(pr.angle) * i), i < 2 ? 2 : 1, i < 2 ? 2 : 1);
+        ctx.fillStyle = '#f4f2ff';
+        ctx.fillRect(Math.round(pr.x), Math.round(pr.y), 1, 1);
+        continue;
+      }
+      const span = pr.big ? 8 : 4;
+      ctx.fillStyle = pr.big ? '#c48cff' : '#b68cff';
+      for (let i = -span; i <= span; i++) {
         const a = pr.angle + Math.PI / 2;
-        const bend = Math.abs(i) * 0.6;
+        const bend = Math.abs(i) * (pr.big ? 0.45 : 0.6);
         ctx.fillRect(Math.round(pr.x + Math.cos(a) * i - Math.cos(pr.angle) * bend), Math.round(pr.y + Math.sin(a) * i - Math.sin(pr.angle) * bend), 2, 2);
       }
       ctx.fillStyle = '#f4f2ff';
-      ctx.fillRect(Math.round(pr.x), Math.round(pr.y), 1, 1);
+      ctx.fillRect(Math.round(pr.x), Math.round(pr.y), pr.big ? 2 : 1, 1);
     }
     // Rings.
     for (const r of fx.rings) {
@@ -774,6 +788,51 @@ export class Renderer {
       ctx.fillRect(Math.round(pt.x), Math.round(pt.y), pt.size, pt.size);
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** Skill leftovers on the ground: Thunderstride lines, Wildfire flames, the Rift Anchor. */
+  drawSkillZones(run) {
+    const ctx = this.ctx;
+    const c = run.combat;
+    for (const z of c.zapLines || []) {
+      const t = z.life / z.max;
+      const n = Math.max(2, Math.round(Math.hypot(z.x1 - z.x0, z.y1 - z.y0) / 5));
+      ctx.fillStyle = Math.floor(this.time * 20) % 2 ? '#c4e4f5' : '#8fd3ff';
+      ctx.globalAlpha = 0.35 + 0.65 * t;
+      for (let i = 0; i <= n; i++) {
+        const k = i / n;
+        const jx = (Math.random() - 0.5) * 3;
+        const jy = (Math.random() - 0.5) * 3;
+        ctx.fillRect(Math.round(z.x0 + (z.x1 - z.x0) * k + jx), Math.round(z.y0 + (z.y1 - z.y0) * k + jy + 4), 1, 1);
+      }
+    }
+    for (const f of c.firePatches || []) {
+      if (!this.inView(f.x, f.y, 8)) continue;
+      const t = f.life / f.max;
+      ctx.globalAlpha = Math.min(1, t * 2);
+      for (let i = 0; i < 3; i++) {
+        const h = 1 + Math.abs(Math.sin(this.time * 10 + f.x + i * 2)) * 3 * t;
+        ctx.fillStyle = i === 1 ? '#ffd36b' : '#ff9a3c';
+        ctx.fillRect(Math.round(f.x - 2 + i * 2), Math.round(f.y - h), 1, Math.ceil(h));
+      }
+    }
+    ctx.globalAlpha = 1;
+    const a = run.player.anchor;
+    if (a) {
+      const pulse = 8 + Math.sin(this.time * 6) * 1.5;
+      ctx.fillStyle = '#b68cff';
+      for (let i = 0; i < 16; i++) {
+        const ang = (i / 16) * Math.PI * 2 + this.time * 2;
+        ctx.fillRect(Math.round(a.x + Math.cos(ang) * pulse), Math.round(a.y - 2 + Math.sin(ang) * pulse * 0.6), 1, 1);
+      }
+      ctx.fillStyle = '#f4f2ff';
+      ctx.fillRect(Math.round(a.x), Math.round(a.y - 2), 1, 1);
+      // A faint tether back to the anchor.
+      const p = run.player;
+      ctx.fillStyle = '#7a3fc0';
+      const n = Math.round(Math.hypot(p.x - a.x, p.y - a.y) / 6);
+      for (let i = 1; i < n; i++) if ((i + Math.floor(this.time * 8)) % 2) ctx.fillRect(Math.round(a.x + ((p.x - a.x) * i) / n), Math.round(a.y - 2 + ((p.y - a.y) * i) / n), 1, 1);
+    }
   }
 
   /** Lasting marks on the ground (bones, blood, scorch, footprints), fading out at the end. */
@@ -870,6 +929,12 @@ export class Renderer {
     }
     for (const r of run.effects.rings) light(r.x, r.y, r.radius, (r.life / r.max) * 0.8);
     for (const pr of run.combat.projectiles) light(pr.x, pr.y, 16, 0.6);
+    for (const z of run.combat.zapLines) light((z.x0 + z.x1) / 2, (z.y0 + z.y1) / 2, 26, 0.6 * (z.life / z.max));
+    for (let i = 0; i < run.combat.firePatches.length; i += 3) {
+      const f = run.combat.firePatches[i];
+      light(f.x, f.y - 2, 18, 0.6 * (f.life / f.max));
+    }
+    if (p.anchor) light(p.anchor.x, p.anchor.y, 22, 0.7);
     lctx.globalAlpha = 1;
     lctx.globalCompositeOperation = 'source-over';
     this.ctx.drawImage(this.light, 0, 0);

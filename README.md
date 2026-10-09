@@ -7,7 +7,7 @@ A dark-fantasy pixel-art roguelike built for phones, playable upright or sideway
 This is a playable prototype. It focuses on the core "one more run" loop:
 
 - **10-minute runs** with four danger phases. The world gets darker and more crowded as the clock runs down. Passive healing also weakens: it drops by 10%, then 25%, then 40%.
-- **Risk/reward extraction.** Three Rift Gates, two of which collapse at 5:00 and 2:00. Escaping later pays more, and reaching 0:00 means you lose your loot.
+- **Risk/reward extraction.** Three Rift Gates, two of which collapse at 5:00 and 2:00. Escaping later pays more, and reaching 0:00 means you lose your loot. A gold **Toll Gate** sits closer to the start and never collapses, but it keeps 40% of the gold you carry.
 - **Four regions,** each with its own look, hazards, enemies and rewards. Escaping one unlocks the next:
   - **Forest Ruins** (96×96 tiles): dark pines and ruins.
   - **Frozen Wastes** (108×108): open tundra and frozen lakes. Standing still gives you frostbite, so keep moving or stay near a campfire.
@@ -18,7 +18,28 @@ This is a playable prototype. It focuses on the core "one more run" loop:
 - **Enemies:** skeletons, slimes (they split), wolves, skeleton archers and dark mages. Each region recolors them, and there are elites plus the **Bone Colossus** in the final minutes.
 - **Loot and gear:** five rarities. Weapons (swords, plus unlockable daggers and axes) and **armor (helm, chest, boots)** roll random affixes, and there are ten legendary uniques plus 17 relics. Armor you wear shows on your character. The **equipment screen** (bag button, or I) shows your gear on a paper doll, your stats, your relics and your bag, and lets you swap items.
 - **Level-ups** pause the game and offer three upgrades. There are 36 upgrades across five build families (crit, fire, bleed, lightning, spectral), and synergy weighting helps builds come together.
+- **Evolutions:** max out an upgrade while owning its partner and the next level-up offers a gold **EVOLUTION** card that changes how the build plays. Cards show which evolution an upgrade leads to. There are 7 evolutions and 3 cross-element **Duos**:
+  - **Second Wind:** Regeneration + Fleet Foot.
+  - **Crimson Harvest:** Bloodthirst + Executioner.
+  - **Iron Maiden:** Thorns + Bulwark.
+  - **Umbral Crescent:** Shadow Wave + Wide Arc.
+  - **Wraith Procession:** Spectral Blade + Phantom Dash.
+  - **Living Storm:** Static Charge + Quickstep.
+  - **Solar Eclipse:** Combustion + Eclipse Nova.
+  - **Duos:** Overload (fire + lightning), Blood Storm (bleed + lightning) and Ghostfire (spectral + fire).
+- **Skills:** a fifth button for an active skill found as loot. Elites drop them (your first elite always does), as do the Colossus and treasure chests. One slot; swap from the bag. Rarer copies hit harder:
+  - **Blood Rush:** a dash-strike that bleeds.
+  - **Thunderstride:** a blink that leaves a lightning line. Its charges refill only as you travel.
+  - **Rift Anchor:** drop an anchor and rip back to it with a blast.
+  - **Wildfire Sprint:** a burst of speed that leaves fire behind.
 - **Random events:** Mysterious Chests (treasure, a curse or an ambush), four kinds of shrine, Wandering Merchants, hidden ambush sites, a guarded treasure room, cursed zones and enemy camps.
+- **Landmarks:** two hand-made set pieces per region are placed into every map, mirrored and rotated:
+  - Forest: Standing Stones and the Ruined Chapel.
+  - Tundra: the Icebound Shrine and the Abandoned Camp.
+  - Caldera: the Obsidian Bridge and the Ashen Forge.
+  - Crypt: the Ossuary and the Hall of Sarcophagi.
+
+  Each holds a good chest, and some are guarded by an elite pack. They're named when you find them and marked on the map. **Braziers** light the ruins; smash one for gold, XP or a potion, but that area goes dark.
 - **Emberfall, the town:** you walk around it between runs. Vendors sell permanent upgrades and unlocks for Embers:
   - **Blacksmith:** damage, armor, daggers and axes.
   - **Mystic:** upgrade tomes, XP and rerolls.
@@ -26,6 +47,7 @@ This is a playable prototype. It focuses on the core "one more run" loop:
   - **Trader:** gold, luck and speed.
 
   The **Rift Portal** picks your region, and the board holds your records.
+- **Look:** enemy eyes glow in the dark before they reach your light. Lighting is drawn in flat, dithered bands. Kills leave bones, blood, slime, ash or scorch marks that fade after a while, and you leave footprints in the snow. Elites get an orange outline and the Colossus a red one. Enemies rise out of the ground.
 - **Readability:** a ring and an overhead HP bar on your character, labels on nearby chests, shrines, gates and merchants, status chips (Hunted, Freezing, Burning, healing reduction), and an objective line under the timer. Rapid hits on one enemy merge into a single number.
 - **Results screen:** cause of death, everything you lost, a breakdown of Embers earned (with a region bonus), and "NEW REGION UNLOCKED" or "NEW UNLOCK AVAILABLE" prompts. **TRY AGAIN** replays the same region instantly.
 - **Saves and settings** live in local storage. The game also autosaves a salvage snapshot, so closing the app mid-run doesn't wipe it.
@@ -102,6 +124,9 @@ tools/                     balance sim, icon generator, sprite preview
 Most content changes only touch `src/data/`:
 
 - **A new upgrade:** add an entry to `UPGRADES` with `mods` (stat changes per rank) and `tags` (for synergy). For a new mechanic, add a stat to `STAT_DEFAULTS` in `stats.js` and read it in `combat.js` or `player.js`.
+- **A new evolution:** add an entry to `EVOLUTIONS` in `data/upgrades.js`. `requires` maps upgrade ids to ranks (use the first upgrade's max rank), and `mods` usually adds a new stat that the systems read.
+- **A new skill:** add it to `SKILLS` in `data/skills.js` and handle its id in `Player.useSkill` (`game/player.js`).
+- **A new landmark:** add an ASCII template to `LANDMARKS` in `data/landmarks.js`. The legend is at the top of that file; `C` is a chest and `F` a brazier.
 - **A new relic:** add an entry to `RELICS`. Use `when: 'final2'` to make it conditional.
 - **A new weapon type:** add a base to `WEAPON_BASES` and its in-hand art to `WEAPON_ART` in `sprites.js`.
 - **A new enemy:** add a definition to `ENEMIES` and its sprite. Reuse an existing `behavior` (`melee`, `hopper`, `lunger`, `archer`, `caster`), or add an AI function in `enemies.js`.

@@ -49,6 +49,18 @@ export const STAT_DEFAULTS = {
   finalRushPct: 0,
   revive: 0,
   lightPct: 0,
+  // Evolutions.
+  moveRegen: 0,
+  critHeal: 0,
+  dashSpikes: 0,
+  shadowReturn: 0,
+  dashBlades: 0,
+  stormStride: 0,
+  novaIgnite: 0,
+  novaSize: 0,
+  overload: 0,
+  chainBleed: 0,
+  orbitIgnite: 0,
 };
 
 const MIN_STATS = new Set(['shadowEvery', 'rhythmEvery']);
@@ -98,7 +110,7 @@ export function computePlayerStats(weapon, modLists) {
     pickupRadius: base.pickupRadius * (1 + m.pickupPct),
     dashCooldown: base.dashCooldown * Math.max(0.35, 1 + m.dashCdPct),
     energyGain: base.energyPerHit * (1 + m.energyPct),
-    novaRadius: 46 * (1 + m.areaPct * 0.6),
+    novaRadius: 46 * (1 + m.areaPct * 0.6) * (1 + m.novaSize),
     novaDamageMult: 2.2 * (1 + m.novaPct),
     potionCapacity: base.potionCapacity + m.potionCap,
     lightRadius: 78 * (1 + m.lightPct),

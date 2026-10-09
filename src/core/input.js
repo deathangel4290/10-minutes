@@ -17,7 +17,7 @@ export class Input {
     this.joyVec = { x: 0, y: 0 };
     this.attackPointers = new Set();
     this.keys = new Set();
-    this.edges = { dash: false, nova: false, potion: false };
+    this.edges = { dash: false, nova: false, potion: false, skill: false };
     this.onPause = null;
 
     this.bindTouch();
@@ -106,6 +106,7 @@ export class Input {
       if (k === 'shift' || k === 'k') this.edges.dash = true;
       if (k === 'e' || k === 'l') this.edges.nova = true;
       if (k === 'q' || k === 'h') this.edges.potion = true;
+      if (k === 'f' || k === 'u') this.edges.skill = true;
       if ((k === 'escape' || k === 'p') && this.onPause) this.onPause();
       if ((k === 'i' || k === 'tab') && this.onGear) {
         e.preventDefault();
@@ -159,15 +160,16 @@ export class Input {
       dash: this.edges.dash,
       nova: this.edges.nova,
       potion: this.edges.potion,
+      skill: this.edges.skill,
       autoAttack: this.autoAttack,
     };
-    this.edges.dash = this.edges.nova = this.edges.potion = false;
+    this.edges.dash = this.edges.nova = this.edges.potion = this.edges.skill = false;
     return out;
   }
 
   releaseAll() {
     this.attackPointers.clear();
-    this.edges = { dash: false, nova: false, potion: false };
+    this.edges = { dash: false, nova: false, potion: false, skill: false };
     for (const el of Object.values(this.buttons)) el && el.classList.remove('pressed');
   }
 }

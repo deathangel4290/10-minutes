@@ -234,7 +234,7 @@ export class Run {
   openLevelUp() {
     const p = this.player;
     const choices = rollUpgradeChoices(this.rng, p.upgrades, this.unlocks, 3);
-    this.hooks.sfx('levelUp');
+    this.hooks.sfx(choices.some((c) => c.evolution) ? 'epicDrop' : 'levelUp');
     this.openModal({ kind: 'levelup', choices, level: p.level - p.pendingLevels + 1, rerolls: this.rerolls });
   }
 
@@ -254,8 +254,14 @@ export class Run {
     this.effects.ring(p.x, p.y - 6, 30, '#ffd36b', 0.45, 2);
     this.effects.burst(p.x, p.y - 6, ['#ffd36b', '#f4f2ff', '#ff9a3c'], 16, 70, 0.6, -20);
     p.iframes = Math.max(p.iframes, 0.6); // grace after unpausing
-    this.hooks.sfx('select');
     this.closeModal();
+    if (u.evolution) {
+      this.effects.ring(p.x, p.y - 6, 52, '#ffab40', 0.7, 2);
+      this.effects.beam(p.x, p.y, 'orange', 1.6);
+      this.hooks.banner(u.duo ? 'DUO UNLOCKED' : 'EVOLVED', u.name, 'gold');
+      this.hooks.sfx('legendaryDrop');
+      this.hooks.shake(4);
+    } else this.hooks.sfx('select');
   }
 
   rerollUpgrades() {
@@ -363,6 +369,18 @@ export class Run {
       this.hooks.itemPickup(item, null);
       return true;
     }
+    if (item.kind === 'skill') {
+      this.bag.push(item);
+      const compare = { current: p.skill };
+      if (!p.skill) {
+        this.equipItem(item.uid, true);
+        compare.autoEquipped = true;
+        this.hooks.banner('NEW SKILL', `${item.name} \u00b7 tap the new button`, 'gold');
+      }
+      this.hooks.sfx('pickupRare');
+      this.hooks.itemPickup(item, compare);
+      return true;
+    }
     if (item.kind === 'armor') {
       this.bag.push(item);
       const current = p.gear[item.slot];
@@ -406,6 +424,9 @@ export class Run {
       const old = p.gear[item.slot];
       if (old) this.bag.push(old);
       p.gear[item.slot] = item;
+    } else if (item.kind === 'skill') {
+      if (p.skill) this.bag.push(p.skill);
+      p.equipSkill(item);
     } else {
       if (!p.weapon.starter) this.bag.push(p.weapon);
       p.weapon = item;
@@ -425,6 +446,7 @@ export class Run {
     const items = [...this.bag, ...this.player.relics];
     if (!this.player.weapon.starter) items.push(this.player.weapon);
     for (const g of Object.values(this.player.gear)) if (g) items.push(g);
+    if (this.player.skill) items.push(this.player.skill);
     return items;
   }
 

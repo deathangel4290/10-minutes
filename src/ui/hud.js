@@ -1,5 +1,6 @@
 // In-run HUD: bars, timer, gold, minimap, toasts, banners, pickup cards.
 
+import { SKILLS } from '../data/skills.js';
 import { $, esc, setText, setStyle, setClass } from './dom.js';
 import { iconURL } from '../gfx/sprites.js';
 import { formatTime, formatInt } from '../core/math.js';
@@ -29,7 +30,7 @@ function minimapColors(paletteName) {
 export function itemIconURL(item, scale = 4) {
   if (item.kind === 'weapon') return iconURL(item.type, item.rarity, scale);
   if (item.kind === 'armor') return iconURL(item.icon, item.rarity, scale);
-  if (item.kind === 'relic') return iconURL(item.icon, item.rarity, scale);
+  if (item.kind === 'relic' || item.kind === 'skill') return iconURL(item.icon, item.rarity, scale);
   return iconURL('potion', 'common', scale);
 }
 
@@ -94,6 +95,11 @@ export class Hud {
     this.novaFill = $('#btn-nova .fill');
     this.dashCd = $('#btn-dash .cd');
     this.potionBadge = $('#btn-potion .badge');
+    this.btnSkill = $('#btn-skill');
+    this.skillCd = $('#btn-skill .cd');
+    this.skillBadge = $('#btn-skill .badge');
+    this.skillImg = $('#btn-skill img');
+    this.skillUid = null;
 
     $('.bar-hp .bar-icon', this.root).src = iconURL('heart', 'common', 2);
     $('.bar-energy .bar-icon', this.root).src = iconURL('gem', 'common', 2);
@@ -164,6 +170,7 @@ export class Hud {
     setStyle(this.dashCd, 'transform', `scaleY(${dashPct.toFixed(2)})`);
     setText(this.potionBadge, `${p.potions}`);
     setClass(this.btnPotion, 'empty', p.potions <= 0);
+    this.updateSkillButton(p);
 
     // Status chips: what is happening to you right now.
     const chips = [];
@@ -209,6 +216,33 @@ export class Hud {
       this.cardT -= dt;
       if (this.cardT <= 0) this.hideCard();
     }
+  }
+
+  /** The Skill button: hidden until you find a skill, then shows its cooldown or charges. */
+  updateSkillButton(p) {
+    const sk = p.skill;
+    setClass(this.btnSkill, 'hidden', !sk);
+    if (!sk) return;
+    const def = SKILLS[sk.skill];
+    if (this.skillUid !== sk.uid) {
+      this.skillUid = sk.uid;
+      this.skillImg.src = iconURL(sk.icon, sk.rarity, 4);
+      this.btnSkill.style.setProperty('--sk', def.color);
+      this.btnSkill.setAttribute('aria-label', sk.name);
+    }
+    if (def.charges) {
+      setText(this.skillBadge, `${p.skillCharges}`);
+      setStyle(this.skillCd, 'transform', `scaleY(${p.skillCharges > 0 ? 0 : (1 - p.skillDist / def.chargeDistance).toFixed(2)})`);
+      setClass(this.btnSkill, 'ready', p.skillCharges > 0);
+      setClass(this.btnSkill, 'empty', p.skillCharges <= 0);
+    } else {
+      setText(this.skillBadge, p.anchor ? `${Math.ceil(p.anchor.t)}` : '');
+      const cd = Math.max(0, p.skillCd / def.cooldown);
+      setStyle(this.skillCd, 'transform', `scaleY(${p.anchor ? 0 : Math.min(1, cd).toFixed(2)})`);
+      setClass(this.btnSkill, 'ready', p.skillCd <= 0 && !p.anchor);
+      setClass(this.btnSkill, 'empty', p.skillCd > 0 && !p.anchor);
+    }
+    setClass(this.btnSkill, 'armed', !!p.anchor || p.sprintT > 0);
   }
 
   drawMinimap(run) {
@@ -307,7 +341,7 @@ export class Hud {
     }
     const info = RARITY_INFO[item.rarity];
     const lines = itemLines(item).slice(0, 3);
-    let sub = `${info.label} ${item.kind === 'relic' ? 'RELIC' : item.kind === 'armor' ? item.slot.toUpperCase() : item.type.toUpperCase()}`;
+    let sub = `${info.label} ${item.kind === 'relic' ? 'RELIC' : item.kind === 'skill' ? 'SKILL' : item.kind === 'armor' ? item.slot.toUpperCase() : item.type.toUpperCase()}`;
     let right = '';
     if (item.kind === 'weapon' && compare) {
       if (compare.autoEquipped) sub += ' · EQUIPPED';
@@ -328,6 +362,12 @@ export class Hud {
       }
     } else if (item.kind === 'relic') {
       sub += ' · ACTIVE';
+    } else if (item.kind === 'skill' && compare) {
+      if (compare.autoEquipped) sub += ' · EQUIPPED';
+      else {
+        lines.unshift(`<span class="delta-up">Replaces ${esc(compare.current.name)} (${Math.round(compare.current.power * 100)}%)</span>`);
+        right = `<button class="btn btn-small btn-primary" data-equip="${item.uid}">EQUIP</button>`;
+      }
     }
     this.card.innerHTML = `
       <div class="pc-icon" style="border-color:${info.color}"><img src="${itemIconURL(item)}" alt=""></div>

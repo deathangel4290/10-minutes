@@ -200,3 +200,103 @@ test('the toll gate takes 40% of your gold, and refuses you if you are short', (
   assert.ok(run.ended);
   assert.equal(run.gold, 300);
 });
+
+test('maxing a recipe offers its evolution first, and evolutions change play', async () => {
+  const { rollUpgradeChoices } = await import('../src/game/upgrades.js');
+  const { EVOLUTIONS, UPGRADE_BY_ID } = await import('../src/data/upgrades.js');
+  const rng = new RNG(5);
+  assert.ok(!rollUpgradeChoices(rng, { regen: 3, fleet: 1 }, {}, 3).some((c) => c.evolution), 'not ready yet');
+  const choices = rollUpgradeChoices(rng, { regen: 4, fleet: 1 }, {}, 3);
+  assert.equal(choices[0].upgrade.id, 'evo_secondwind');
+  assert.ok(!rollUpgradeChoices(rng, { regen: 4, fleet: 1, evo_secondwind: 1 }, {}, 3).some((c) => c.evolution), 'only once');
+  // Every recipe names real upgrades, within their max rank.
+  for (const e of EVOLUTIONS) for (const [id, r] of Object.entries(e.requires)) assert.ok(UPGRADE_BY_ID[id] && r <= UPGRADE_BY_ID[id].maxRank, `${e.id}: ${id}`);
+
+  // Second Wind: regeneration keeps going through hits while you move.
+  const run = new Run({ seed: 31 });
+  const p = run.player;
+  p.upgrades = { regen: 4, fleet: 1, evo_secondwind: 1 };
+  p.recompute();
+  p.hp = 10;
+  p.regenPause = 5;
+  step(run, 1, { ...idle, moveX: 1 });
+  assert.ok(p.hp > 10 + p.stats.regen * 2, 'triple regen while moving, even right after a hit');
+
+  // Iron Maiden: the end of a dash hurts what's around you.
+  const run2 = new Run({ seed: 33 });
+  run2.director.update = () => {};
+  run2.enemies.length = 0;
+  const p2 = run2.player;
+  p2.upgrades = { thorns: 3, bulwark: 1, evo_maiden: 1 };
+  p2.recompute();
+  const e = run2.director.spawnAt('skeleton', p2.x + 40, p2.y, {});
+  e.spawnT = 0;
+  e.hp = e.maxHp = 1e5;
+  p2.facing = 1;
+  run2.update(1 / 60, { ...idle, moveX: 1, dash: true });
+  for (let i = 0; i < 30; i++) run2.update(1 / 60, { ...idle, moveX: 1 });
+  assert.ok(e.hp < 1e5, 'spikes hit the enemy at the end of the dash');
+});
+
+test('skills: found as loot, equipped, and each one works', async () => {
+  const { makeSkill } = await import('../src/game/items.js');
+  const { SKILL_IDS } = await import('../src/data/skills.js');
+  const rng = new RNG(3);
+  for (const id of SKILL_IDS) {
+    const run = new Run({ seed: 41 });
+    run.director.update = () => {};
+    run.enemies.length = 0;
+    const p = run.player;
+    p.takeDamage = () => 0;
+    assert.ok(run.collectItem(makeSkill(rng, { rarity: 'rare', id })));
+    assert.equal(p.skill.skill, id, `${id} auto-equips into the empty slot`);
+    const foes = [];
+    for (let i = 0; i < 6; i++) {
+      const e = run.director.spawnAt('skeleton', p.x + 20 + i * 6, p.y + (i % 2 ? 6 : -6), {});
+      e.spawnT = 0;
+      e.hp = e.maxHp = 1e5;
+      foes.push(e);
+    }
+    const hp0 = foes.reduce((a, e) => a + e.hp, 0);
+    const press = { ...idle, moveX: 1, skill: true };
+    if (id === 'riftanchor') {
+      run.update(1 / 60, press); // drop the anchor
+      assert.ok(p.anchor);
+      const ax = p.anchor.x;
+      for (let i = 0; i < 30; i++) run.update(1 / 60, { ...idle, moveX: -1 });
+      run.update(1 / 60, press); // rip back to it
+      assert.ok(!p.anchor);
+      assert.ok(Math.abs(p.x - ax) < 1, 'teleported back to the anchor');
+    } else {
+      run.update(1 / 60, press);
+      for (let i = 0; i < 90; i++) run.update(1 / 60, { ...idle, moveX: 1 });
+    }
+    const hp1 = foes.reduce((a, e) => a + Math.max(0, e.hp), 0);
+    assert.ok(hp1 < hp0, `${id} damages foes`);
+  }
+});
+
+test('Thunderstride charges come back only by travelling', async () => {
+  const { makeSkill } = await import('../src/game/items.js');
+  const run = new Run({ seed: 43 });
+  run.director.update = () => {};
+  run.enemies.length = 0;
+  const p = run.player;
+  run.collectItem(makeSkill(new RNG(1), { rarity: 'common', id: 'thunderstride' }));
+  for (let i = 0; i < 3; i++) run.update(1 / 60, { ...idle, skill: true });
+  assert.equal(p.skillCharges, 0);
+  step(run, 5); // standing still
+  assert.equal(p.skillCharges, 0, 'no charges from waiting');
+  step(run, 3, { ...idle, moveX: 1, moveY: 0.3 });
+  assert.ok(p.skillCharges > 0, 'travelling recharges it');
+});
+
+test('the first elite you kill drops a skill', () => {
+  const run = new Run({ seed: 47 });
+  run.director.update = () => {};
+  run.enemies.length = 0;
+  const p = run.player;
+  const e = run.director.spawnAt('skeleton', p.x + 30, p.y, { elite: true });
+  run.combat.killEnemy(e);
+  assert.ok(run.pickups.list.some((pk) => pk.kind === 'item' && pk.item.kind === 'skill'));
+});

@@ -684,7 +684,8 @@ button {
 
 #controls.town-mode #btn-attack,
 #controls.town-mode #btn-nova,
-#controls.town-mode #btn-potion {
+#controls.town-mode #btn-potion,
+#controls.town-mode #btn-skill {
   display: none;
 }
 
@@ -806,8 +807,8 @@ button {
   position: absolute;
   right: calc(14px + var(--safe-right));
   bottom: calc(26px + var(--safe-bottom));
-  width: 190px;
-  height: 170px;
+  width: 200px;
+  height: 160px;
   pointer-events: none;
 }
 
@@ -862,13 +863,39 @@ button {
 }
 
 #btn-nova {
-  right: 74px;
-  bottom: 72px;
+  right: 84px;
+  bottom: 76px;
 }
 
 #btn-potion {
+  right: 150px;
+  bottom: 92px;
+}
+
+/* The Skill button appears above Attack once you find a skill. */
+#btn-skill {
   right: 14px;
-  bottom: 100px;
+  bottom: 98px;
+}
+
+#btn-skill.ready {
+  border-color: var(--sk, var(--purple-hi));
+  box-shadow: 0 0 0 2px #000, 0 0 14px var(--sk, rgba(196, 140, 255, 0.9));
+}
+
+#btn-skill.armed {
+  animation: skill-armed 0.5s infinite alternate;
+}
+
+@keyframes skill-armed {
+  to {
+    box-shadow: 0 0 0 2px #000, 0 0 22px var(--sk, #b68cff);
+    transform: scale(1.06);
+  }
+}
+
+#btn-skill.empty img {
+  opacity: 0.45;
 }
 
 .act .cd {
@@ -1142,6 +1169,33 @@ button {
 
 .tag.syn {
   background: #3a2810;
+  color: var(--orange-hi);
+}
+
+.tag.evo {
+  color: #1a0d05;
+  background: linear-gradient(#ffd36b, #ff9a3c);
+  border-color: #ffd36b;
+}
+
+.tag.recipe {
+  color: var(--orange-hi);
+  border-color: #8a5a20;
+  background: rgba(60, 30, 10, 0.6);
+}
+
+.up-card.r-evolution {
+  border-color: #ffab40;
+  background: linear-gradient(#3a2410, #1a1008);
+  box-shadow: 0 3px 0 #000, 0 0 18px rgba(255, 154, 60, 0.45);
+}
+
+.up-card.r-evolution .nm {
+  color: var(--orange-hi);
+}
+
+.build-chip.evo {
+  border-color: #ffab40;
   color: var(--orange-hi);
 }
 
@@ -1801,6 +1855,10 @@ button {
 }
 .s-boots {
   grid-column: 2;
+  grid-row: 3;
+}
+.s-skill {
+  grid-column: 1;
   grid-row: 3;
 }
 

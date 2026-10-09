@@ -33,7 +33,7 @@ class App {
     this.input = new Input($('#controls'), {
       joyBase: $('#joy-base'),
       joyKnob: $('#joy-knob'),
-      buttons: { attack: $('#btn-attack'), dash: $('#btn-dash'), nova: $('#btn-nova'), potion: $('#btn-potion') },
+      buttons: { attack: $('#btn-attack'), dash: $('#btn-dash'), nova: $('#btn-nova'), potion: $('#btn-potion'), skill: $('#btn-skill') },
     });
     this.input.onGear = () => {
       if (this.state !== 'run' || !this.run || this.run.modal) return;
@@ -67,7 +67,7 @@ class App {
     this.paused = false;
     this.acc = 0;
     this.hitstop = 0;
-    this.heldEdges = { dash: false, nova: false, potion: false };
+    this.heldEdges = { dash: false, nova: false, potion: false, skill: false };
     this.endTimer = 0;
     this.heartbeatT = 0;
     this.lastTick = null;
@@ -552,6 +552,7 @@ class App {
     input.dash = input.dash || this.heldEdges.dash;
     input.nova = input.nova || this.heldEdges.nova;
     input.potion = input.potion || this.heldEdges.potion;
+    input.skill = input.skill || this.heldEdges.skill;
     let steps = 0;
     if (!this.paused && !run.modal) {
       if (this.hitstop > 0) {
@@ -568,7 +569,7 @@ class App {
         if (steps >= 5) this.acc = 0;
       }
     }
-    this.heldEdges = steps === 0 && !run.modal && !this.paused ? { dash: input.dash, nova: input.nova, potion: input.potion } : { dash: false, nova: false, potion: false };
+    this.heldEdges = steps === 0 && !run.modal && !this.paused ? { dash: input.dash, nova: input.nova, potion: input.potion, skill: input.skill } : { dash: false, nova: false, potion: false, skill: false };
 
     this.renderer.render(run, this.paused || run.modal ? 0 : dt);
     this.hud.update(run, dt);

@@ -2,7 +2,7 @@
 // Gold and XP are magnetized; items need to be walked over.
 
 import { rollRarity, bumpRarity, RARITY_INFO } from '../data/rarities.js';
-import { makeWeapon, makeRelic, makePotion, makeArmor } from './items.js';
+import { makeWeapon, makeRelic, makePotion, makeArmor, makeSkill } from './items.js';
 
 const MAX_SHARDS = 160;
 
@@ -66,6 +66,7 @@ export class Pickups {
     if (bump) rarity = bumpRarity(rarity, bump);
     const kind = forceKind || run.rng.weightedKey({ weapon: 40, armor: 34, relic: 26 });
     if (kind === 'armor') return makeArmor(run.rng, { rarity, itemLevel: level });
+    if (kind === 'skill') return makeSkill(run.rng, { rarity });
     if (kind === 'relic') {
       const relic = makeRelic(run.rng, rarity, run.player.relics.map((r) => r.id));
       if (relic) return relic;

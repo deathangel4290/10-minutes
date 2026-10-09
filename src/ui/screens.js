@@ -255,15 +255,22 @@ export class Screens {
         const u = c.upgrade;
         const rarity = u.rarity === 'common' ? 'common' : u.rarity;
         const tags = [];
-        if (c.rank === 1 && u.family) tags.push('<span class="tag new">UNLOCKED</span>');
-        if (c.synergy) tags.push('<span class="tag syn">SYNERGY</span>');
-        if (u.rarity !== 'common') tags.push(`<span class="tag">${u.rarity.toUpperCase()}</span>`);
+        if (u.evolution) {
+          tags.push(`<span class="tag evo">${u.duo ? 'DUO' : 'EVOLUTION'}</span>`);
+          tags.push(`<span class="tag recipe">${Object.keys(u.requires).map((id) => esc(UPGRADE_BY_ID[id].name)).join(' + ')}</span>`);
+        } else {
+          if (c.rank === 1 && u.family) tags.push('<span class="tag new">UNLOCKED</span>');
+          if (c.synergy) tags.push('<span class="tag syn">SYNERGY</span>');
+          if (u.rarity !== 'common') tags.push(`<span class="tag">${u.rarity.toUpperCase()}</span>`);
+          if (c.evolvesInto) tags.push(`<span class="tag recipe">\u2192 ${esc(c.evolvesInto)}</span>`);
+        }
+        const iconRarity = u.evolution ? 'legendary' : u.rarity === 'common' ? 'common' : u.rarity === 'rare' ? 'rare' : 'epic';
         return `<button class="up-card r-${rarity}" data-action="pickUpgrade" data-index="${i}">
-          <div class="ic"><img src="${iconURL(u.icon, u.rarity === 'common' ? 'common' : u.rarity === 'rare' ? 'rare' : 'epic', 4)}" alt=""></div>
+          <div class="ic"><img src="${iconURL(u.icon, iconRarity, 4)}" alt=""></div>
           <div>
             <div class="nm">${esc(u.name)}</div>
             <div class="ds">${esc(u.desc(c.rank))}</div>
-            <div class="meta"><span class="pips">${u.maxRank < 20 ? pips(c.rank, u.maxRank) : ''}</span>${tags.join('')}</div>
+            <div class="meta"><span class="pips">${u.maxRank < 20 && !u.evolution ? pips(c.rank, u.maxRank) : ''}</span>${tags.join('')}</div>
           </div>
         </button>`;
       })
@@ -401,6 +408,7 @@ export class Screens {
       .map(([id, rank]) => {
         const u = UPGRADE_BY_ID[id];
         if (!u) return '';
+        if (u.evolution) return `<div class="build-chip evo"><img src="${iconURL(u.icon, 'legendary', 2)}" alt="">${esc(u.name)}</div>`;
         return `<div class="build-chip"><img src="${iconURL(u.icon, u.rarity === 'common' ? 'common' : u.rarity === 'rare' ? 'rare' : 'epic', 2)}" alt="">${esc(u.name)} ${rank}</div>`;
       })
       .join('');
@@ -433,8 +441,9 @@ export class Screens {
       ['weapon', 'WEAPON', p.weapon, 'sword'],
       ['chest', 'CHEST', p.gear.chest, 'cuirass'],
       ['boots', 'BOOTS', p.gear.boots, 'greaves'],
+      ['skill', 'SKILL', p.skill, 'bolt'],
     ];
-    const all = [p.weapon, ...Object.values(p.gear).filter(Boolean), ...run.bag, ...p.relics];
+    const all = [p.weapon, p.skill, ...Object.values(p.gear).filter(Boolean), ...run.bag, ...p.relics].filter(Boolean);
     const selected = all.find((it) => it && it.uid === Number(selectedUid)) || p.weapon;
     const doll = canvasURL(this.sprites.playerSprites(p.gear).player_idle.r, 6);
     const slotHtml = slots
@@ -449,7 +458,7 @@ export class Screens {
       .join('');
     const detail = selected
       ? `<div class="gear-detail"><div class="nm" style="color:${RARITY_INFO[selected.rarity].color}">${esc(selected.name)}</div>
-          <div>${RARITY_INFO[selected.rarity].label} ${selected.kind === 'armor' ? selected.slot.toUpperCase() : selected.kind === 'relic' ? 'RELIC' : (selected.type || '').toUpperCase()}</div>
+          <div>${RARITY_INFO[selected.rarity].label} ${selected.kind === 'armor' ? selected.slot.toUpperCase() : selected.kind === 'relic' ? 'RELIC' : selected.kind === 'skill' ? 'SKILL' : (selected.type || '').toUpperCase()}</div>
           ${itemLines(selected).map((l) => `<div>${esc(l)}</div>`).join('')}</div>`
       : '';
     const stat = (k, v) => `<div><span class="k">${k}</span><span class="v">${v}</span></div>`;
@@ -471,7 +480,7 @@ export class Screens {
           .join('')}</div>`
       : '';
     const bag = run.bag
-      .filter((it) => it.kind === 'weapon' || it.kind === 'armor')
+      .filter((it) => it.kind === 'weapon' || it.kind === 'armor' || it.kind === 'skill')
       .sort((a, b) => RARITY_INFO[b.rarity].tier - RARITY_INFO[a.rarity].tier)
       .map((it) => {
         const lines = itemLines(it).slice(0, 2).join(' · ');
@@ -532,7 +541,7 @@ export class Screens {
         <button class="btn btn-primary" data-action="${backAction}">DONE</button>
         <button class="btn btn-small btn-danger" data-action="resetConfirm" style="margin:6px auto 0">RESET PROGRESS</button>
       </div>
-      <div class="hint">Keyboard: WASD move · Space attack · Shift dash · E nova · Q potion · Esc pause</div>
+      <div class="hint">Keyboard: WASD move · Space attack · Shift dash · E nova · F skill · Q potion · I bag · Esc pause</div>
     </div>`);
     for (const input of this.modal.querySelectorAll('input[data-setting]')) {
       input.addEventListener('input', () => this.onAction('setSetting', { key: input.dataset.setting, value: input.value }));

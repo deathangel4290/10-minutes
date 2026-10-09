@@ -6,6 +6,7 @@ import { RARITY_INFO, RARITIES } from '../data/rarities.js';
 import { EMBER_RULES } from '../data/config.js';
 import { STAT_LABELS } from './statLabels.js';
 import { ARMOR_BASES, ARMOR_MATERIALS, ARMOR_LEGENDARIES, ARMOR_SLOTS } from '../data/armor.js';
+import { SKILLS, SKILL_IDS, SKILL_POWER } from '../data/skills.js';
 
 let uidCounter = 1;
 const uid = () => uidCounter++;
@@ -176,6 +177,12 @@ export function makeRelic(rng, rarity, ownedIds = []) {
   return null;
 }
 
+/** An active skill as an item. Rarity sets its power. */
+export function makeSkill(rng, { rarity, id = null }) {
+  const def = SKILLS[id || rng.pick(SKILL_IDS)];
+  return { kind: 'skill', uid: uid(), skill: def.id, name: def.name, rarity, icon: def.icon, power: SKILL_POWER[rarity] || 1, desc: def.desc };
+}
+
 export function makePotion() {
   return { kind: 'potion', uid: uid(), name: 'Health Potion', rarity: 'common' };
 }
@@ -208,6 +215,10 @@ export function itemLines(item) {
     }
     if (item.special) lines.push(`\u2605 ${item.special}`);
   } else if (item.kind === 'relic') {
+    lines.push(item.desc);
+  } else if (item.kind === 'skill') {
+    const def = SKILLS[item.skill];
+    lines.push(`${Math.round(item.power * 100)}% power \u00b7 ${def.charges ? `${def.charges} charges, refilled by travel` : `${def.cooldown}s cooldown`}`);
     lines.push(item.desc);
   } else if (item.kind === 'potion') {
     lines.push('Restores 40% HP');
