@@ -10,13 +10,14 @@ export class Input {
     this.sensitivity = 1;
     this.autoAttack = false;
     this.enabled = true;
+    this.joyZone = 0.62; // share of the screen (from the left) that starts the joystick
 
     this.joyId = null;
     this.joyOrigin = { x: 0, y: 0 };
     this.joyVec = { x: 0, y: 0 };
     this.attackPointers = new Set();
     this.keys = new Set();
-    this.edges = { dash: false, nova: false, potion: false };
+    this.edges = { dash: false, nova: false, potion: false, skill: false };
     this.onPause = null;
 
     this.bindTouch();
@@ -34,7 +35,7 @@ export class Input {
       if (!this.enabled || this.joyId !== null) return;
       if (e.target.closest('[data-btn]')) return;
       const rect = zone.getBoundingClientRect();
-      if (e.clientX - rect.left > rect.width * 0.62) return; // right side belongs to buttons
+      if (e.clientX - rect.left > rect.width * this.joyZone) return; // right side belongs to buttons
       this.joyId = e.pointerId;
       this.joyOrigin = { x: e.clientX, y: e.clientY };
       this.joyVec = { x: 0, y: 0 };
@@ -105,7 +106,12 @@ export class Input {
       if (k === 'shift' || k === 'k') this.edges.dash = true;
       if (k === 'e' || k === 'l') this.edges.nova = true;
       if (k === 'q' || k === 'h') this.edges.potion = true;
+      if (k === 'f' || k === 'u') this.edges.skill = true;
       if ((k === 'escape' || k === 'p') && this.onPause) this.onPause();
+      if ((k === 'i' || k === 'tab') && this.onGear) {
+        e.preventDefault();
+        this.onGear();
+      }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
     window.addEventListener('blur', () => {
@@ -154,15 +160,16 @@ export class Input {
       dash: this.edges.dash,
       nova: this.edges.nova,
       potion: this.edges.potion,
+      skill: this.edges.skill,
       autoAttack: this.autoAttack,
     };
-    this.edges.dash = this.edges.nova = this.edges.potion = false;
+    this.edges.dash = this.edges.nova = this.edges.potion = this.edges.skill = false;
     return out;
   }
 
   releaseAll() {
     this.attackPointers.clear();
-    this.edges = { dash: false, nova: false, potion: false };
+    this.edges = { dash: false, nova: false, potion: false, skill: false };
     for (const el of Object.values(this.buttons)) el && el.classList.remove('pressed');
   }
 }

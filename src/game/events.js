@@ -26,7 +26,13 @@ export class Events {
     if (pl.dead) return;
     for (const poi of run.pois) {
       const d2 = (poi.x - pl.x) ** 2 + (poi.y - pl.y) ** 2;
-      if (!poi.discovered && d2 < 110 * 110) poi.discovered = true;
+      if (!poi.discovered && d2 < 110 * 110) {
+        poi.discovered = true;
+        if (poi.type === 'landmark') {
+          run.hooks.toast(`Discovered: ${poi.name}`, 'gold');
+          run.hooks.sfx('discover');
+        }
+      }
       if (poi.radius <= 0) continue;
       const inside = d2 < (poi.radius + pl.radius) ** 2;
       if (!inside) {
@@ -104,6 +110,7 @@ export class Events {
       run.pickups.dropRandomItem(poi.x, poi.y - 4, { minRarity: it.min, levelBonus, bump: poi.cursed ? 1 : 0 });
     }
     if (run.rng.chance(t.potion)) run.pickups.dropPotion(poi.x, poi.y - 4);
+    if ((poi.treasure || poi.landmark) && run.rng.chance(0.35)) run.pickups.dropItem(poi.x, poi.y - 4, run.pickups.rollItem({ forceKind: 'skill', minRarity: 'uncommon', levelBonus }));
     run.stats.chests++;
     run.effects.burst(poi.x, poi.y - 8, ['#ffd36b', '#ff9a3c', RARITY_INFO[poi.rarity].color], 14, 70, 0.6, 40);
     run.hooks.sfx(RARITY_INFO[poi.rarity].tier >= 3 ? 'chestBig' : 'chest');
@@ -225,7 +232,7 @@ export class Events {
       run.collectItem(makePotion());
       s.sold = false; // potions stay in stock
     } else if (s.kind === 'blessing') {
-      pl.heal(pl.stats.maxHp);
+      pl.heal(pl.stats.maxHp, true);
       run.effects.burst(pl.x, pl.y - 6, ['#7fd65a', '#f4f2ff'], 14, 50, 0.6, -20);
     } else if (s.item) {
       run.collectItem(s.item, { bought: true });

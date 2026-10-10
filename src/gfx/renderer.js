@@ -1,13 +1,14 @@
 // Draws a Run to a low-resolution canvas that CSS scales up by an integer
 // factor (crisp pixels, cheap on weak phones).
 
-import { TILE, TARGET_VIEW_WIDTH } from '../data/config.js';
+import { TILE, TARGET_VIEW_WIDTH, TARGET_VIEW_HEIGHT_WIDE } from '../data/config.js';
 import { PLAYER_HAND } from './art.js';
 import { makeCanvas } from './sprites.js';
 import { bakeBackground, ellipse } from './background.js';
 import { drawText } from './font.js';
 import { RARITY_INFO } from '../data/rarities.js';
 import { clamp, lerp } from '../core/math.js';
+import { T } from '../game/map.js';
 
 const RARITY_GLOW = { common: null, uncommon: 'green', rare: 'blue', epic: 'purple', legendary: 'orange' };
 
@@ -28,14 +29,15 @@ export class Renderer {
     this.bg = null;
     this.bgFor = null;
     this.drawList = [];
+    this.eyes = []; // enemy eyes to light up after the darkness pass
     this.time = 0;
     this.shadows = {};
   }
 
-  resize(cssW, cssH, dpr) {
+  resize(cssW, cssH, dpr, wide = false) {
     const devW = Math.max(1, Math.round(cssW * dpr));
     const devH = Math.max(1, Math.round(cssH * dpr));
-    this.scale = Math.max(1, Math.round(devW / TARGET_VIEW_WIDTH));
+    this.scale = Math.max(1, Math.round(wide ? devH / TARGET_VIEW_HEIGHT_WIDE : devW / TARGET_VIEW_WIDTH));
     this.W = Math.ceil(devW / this.scale);
     this.H = Math.ceil(devH / this.scale);
     this.canvas.width = this.W;
@@ -54,7 +56,12 @@ export class Renderer {
 
   prepare(run) {
     if (this.bgFor !== run.map) {
-      this.bg = bakeBackground(run.map, this.S);
+      // The town never changes, so keep its baked ground between visits.
+      if (run.map.biome.id === 'town') {
+        this.townBg = this.townBg && this.townBgFor === run.map ? this.townBg : bakeBackground(run.map, this.S);
+        this.townBgFor = run.map;
+        this.bg = this.townBg;
+      } else this.bg = bakeBackground(run.map, this.S);
       this.bgFor = run.map;
       const p = run.player;
       this.cam.x = p.x - this.W / 2;
@@ -109,16 +116,22 @@ export class Renderer {
     ctx.translate(-cx, -cy);
 
     this.drawGroundLayer(run);
+    this.drawDecals(run);
+    this.drawSkillZones(run);
+    this.eyes.length = 0;
     this.collectDrawables(run);
     for (const d of this.drawList) this.drawItem(run, d);
     this.drawEffects(run);
     ctx.restore();
 
-    if (this.quality) this.drawLighting(run, cx, cy);
-    else this.drawVignette();
+    if (this.quality) {
+      this.drawLighting(run, cx, cy);
+      this.drawEyes(run, cx, cy);
+    } else this.drawVignette();
 
     ctx.save();
     ctx.translate(-cx, -cy);
+    this.drawLabels(run);
     this.drawNumbers(run);
     ctx.restore();
     this.drawEdgeArrows(run, cx, cy);
@@ -131,10 +144,36 @@ export class Renderer {
   drawGroundLayer(run) {
     const ctx = this.ctx;
     const S = this.S;
+    this.drawTerrainFx(run);
+    this.drawSpikes(run);
+    this.drawRunes(run);
+    // Player marker: a soft ring at the feet so you never lose yourself in a crowd.
+    const pl = run.player;
+    if (!pl.dead) {
+      ctx.globalAlpha = 0.35 + Math.sin(this.time * 4) * 0.1;
+      ctx.drawImage(S.glow.white, pl.x - 11, pl.y - 6, 22, 10);
+      ctx.globalAlpha = 1;
+    }
     // Telegraphs drawn on the ground.
     for (const e of run.enemies) {
       if (e.state !== 'windup' || !this.inView(e.x, e.y)) continue;
-      if (e.def.behavior === 'lunger') {
+      if (e.def.behavior === 'melee') {
+        // A red wedge shows exactly where the swing will land.
+        const prog = 1 - e.timer / e.def.windup;
+        const reach = e.def.attackRange + 8;
+        const a = Math.atan2(run.player.y - e.y, run.player.x - e.x);
+        ctx.fillStyle = `rgba(224, 56, 74, ${0.18 + prog * 0.35})`;
+        ctx.beginPath();
+        ctx.moveTo(e.x, e.y - 3);
+        ctx.arc(e.x, e.y - 3, reach * (0.4 + prog * 0.6), a - 0.8, a + 0.8);
+        ctx.closePath();
+        ctx.fill();
+      } else if (e.def.behavior === 'archer') {
+        // Aim line: where the arrow will fly.
+        const prog = 1 - e.timer / e.def.windup;
+        ctx.fillStyle = `rgba(255, 90, 90, ${0.3 + prog * 0.5})`;
+        for (let i = 8; i < e.def.range; i += 4) ctx.fillRect(Math.round(e.x + e.aimX * i), Math.round(e.y - 7 + e.aimY * i), 1, 1);
+      } else if (e.def.behavior === 'lunger') {
         const len = e.def.lungeSpeed * e.def.lungeTime;
         const prog = 1 - e.timer / e.def.lungeWindup;
         ctx.fillStyle = `rgba(224, 56, 74, ${0.25 + prog * 0.45})`;
@@ -159,12 +198,100 @@ export class Renderer {
     }
     // Gate ground glow.
     for (const poi of run.pois) {
-      if (poi.type !== 'gate' || !this.inView(poi.x, poi.y)) continue;
+      if ((poi.type !== 'gate' && poi.type !== 'portal') || !this.inView(poi.x, poi.y)) continue;
       if (poi.open) {
         const pulse = 0.5 + Math.sin(this.time * 3) * 0.2;
         ctx.globalAlpha = pulse;
         ctx.drawImage(S.glow.purple, poi.x - 24, poi.y - 10, 48, 20);
         ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  /** Animated terrain: bubbling lava, glinting ice, region weather. */
+  drawTerrainFx(run) {
+    const ctx = this.ctx;
+    const map = run.map;
+    const x0 = Math.max(0, Math.floor(this.cx / TILE));
+    const y0 = Math.max(0, Math.floor(this.cy / TILE));
+    const x1 = Math.min(map.n - 1, Math.floor((this.cx + this.W) / TILE));
+    const y1 = Math.min(map.n - 1, Math.floor((this.cy + this.H) / TILE));
+    const pal = map.biome.palette;
+    if (pal === 'ash' || pal === 'snow') {
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          const t = map.tiles[ty * map.n + tx];
+          if (t === T.LAVA) {
+            const k = Math.sin(this.time * 2 + tx * 1.3 + ty * 0.7);
+            if (k > 0.6) {
+              ctx.fillStyle = k > 0.9 ? '#ffd36b' : '#ff9a3c';
+              ctx.fillRect(tx * TILE + ((tx * 7 + ty * 3) % 13), ty * TILE + ((tx * 5 + ty * 11) % 13), 2, 1);
+            }
+            if (Math.random() < 0.003) run.effects.particle(tx * TILE + Math.random() * 16, ty * TILE + Math.random() * 16, 0, -14, 0.8, '#ff9a3c', 1, -6, 0.5);
+          } else if (t === T.ICE && Math.sin(this.time * 1.5 + tx * 2.1 + ty) > 0.97) {
+            ctx.fillStyle = '#e8f6ff';
+            ctx.fillRect(tx * TILE + 5, ty * TILE + 6, 3, 1);
+          }
+        }
+      }
+    }
+    // Weather / ambient particles.
+    const kind = map.biome.particles;
+    if (kind && this.quality) {
+      const rx = this.cx + Math.random() * this.W;
+      const ry = this.cy + Math.random() * this.H;
+      if (kind === 'snow' && Math.random() < 0.9) run.effects.particle(rx, this.cy - 4, -8 + Math.random() * 4, 22 + Math.random() * 10, 6, Math.random() < 0.7 ? '#e8eef8' : '#aeb9cf', 1, 0, 0);
+      else if (kind === 'ash' && Math.random() < 0.5) run.effects.particle(rx, ry, 4, -8, 3, Math.random() < 0.3 ? '#ff9a3c' : '#5a4a48', 1, -1, 0.2);
+      else if (kind === 'fireflies' && Math.random() < 0.06) run.effects.particle(rx, ry, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, 2.5, '#d7f06a', 1, 0, 0.1);
+      else if (kind === 'dust' && Math.random() < 0.15) run.effects.particle(rx, ry, 2, 1, 3, '#4a4560', 1, 0, 0.1);
+    }
+  }
+
+  drawSpikes(run) {
+    const ctx = this.ctx;
+    for (const s of run.map.spikes) {
+      if (!this.inView(s.x, s.y, 20)) continue;
+      const x = s.tx * TILE;
+      const y = s.ty * TILE;
+      ctx.fillStyle = '#1a1826';
+      ctx.fillRect(x + 1, y + 1, 14, 14);
+      for (let k = 0; k < 9; k++) {
+        const sx = x + 3 + (k % 3) * 5;
+        const sy = y + 3 + Math.floor(k / 3) * 5;
+        if (s.state === 'up') {
+          ctx.fillStyle = '#c9c6dc';
+          ctx.fillRect(sx, sy - 3, 1, 4);
+          ctx.fillStyle = '#e0384a';
+          ctx.fillRect(sx, sy - 3, 1, 1);
+        } else if (s.state === 'warn') {
+          ctx.fillStyle = Math.floor(this.time * 12) % 2 ? '#ff5a5a' : '#8a84a6';
+          ctx.fillRect(sx, sy - 1, 1, 2);
+        } else {
+          ctx.fillStyle = '#07060c';
+          ctx.fillRect(sx, sy, 1, 1);
+        }
+      }
+    }
+  }
+
+  /** Delayed blasts: the ring shows the area, the fill shows the fuse. */
+  drawRunes(run) {
+    const ctx = this.ctx;
+    for (const r of run.combat.runes) {
+      if (!this.inView(r.x, r.y, r.radius + 4)) continue;
+      const prog = Math.min(1, r.t / r.delay);
+      const lava = r.color === 'orange';
+      const rgb = lava ? '255,120,40' : '196,140,255';
+      ctx.fillStyle = `rgba(${rgb},${0.12 + prog * 0.28})`;
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y, r.radius * prog, r.radius * 0.7 * prog, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = lava ? '#ff9a3c' : '#c48cff';
+      const n = Math.round(r.radius * 2);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + (lava ? 0 : this.time);
+        if (!lava && i % 4 === 3) continue;
+        ctx.fillRect(Math.round(r.x + Math.cos(a) * r.radius), Math.round(r.y + Math.sin(a) * r.radius * 0.7), 1, 1);
       }
     }
   }
@@ -209,11 +336,12 @@ export class Renderer {
   drawProp(pr, player) {
     const S = this.S;
     let img;
-    if (pr.kind === 'pine') img = S.pines[pr.variant % S.pines.length];
-    else if (pr.kind === 'round') img = S.roundTrees[pr.variant % S.roundTrees.length];
-    else if (pr.kind === 'dead') img = S.deadTrees[pr.variant % S.deadTrees.length];
+    const set = S.props[pr.kind];
+    if (set) img = set[pr.variant % set.length];
     else if (pr.kind === 'pillar') img = S.pillar;
-    else img = S.pillarBroken;
+    else if (pr.kind === 'pillarBroken') img = S.pillarBroken;
+    else if (S.buildings && S.buildings[pr.kind]) img = S.buildings[pr.kind];
+    else return;
     const x = Math.round(pr.x - img.width / 2);
     const y = Math.round(pr.y - img.height + 1);
     // Canopies in front of the player turn see-through so the hero is never lost.
@@ -241,6 +369,23 @@ export class Renderer {
     const x = Math.round(poi.x);
     const y = Math.round(poi.y);
     switch (poi.type) {
+      case 'brazier': {
+        ctx.drawImage(this.shadow(4), x - 5, y - 3);
+        ctx.drawImage(poi.lit ? S.brazier : S.brazierOut, x - 4, y - 9);
+        if (poi.lit) {
+          const flameColors = ['#ffd36b', '#ff9a3c', '#c2561f'];
+          for (let i = 0; i < 5; i++) {
+            const fx = x - 3 + i * 1.5;
+            const hgt = 2 + Math.abs(Math.sin(this.time * 9 + i * 1.7 + x)) * 4;
+            for (let k = 0; k < hgt; k++) {
+              ctx.fillStyle = flameColors[Math.min(2, Math.floor((k / hgt) * 3))];
+              ctx.fillRect(Math.round(fx), Math.round(y - 10 - k), 1, 1);
+            }
+          }
+          if (Math.random() < 0.08) run.effects.particle(x + (Math.random() - 0.5) * 6, y - 14, (Math.random() - 0.5) * 6, -18, 0.8, '#ff9a3c', 1, 0, 0.5);
+        }
+        break;
+      }
       case 'chest': {
         const img = poi.opened ? S.chestOpen[poi.rarity] : S.chest[poi.rarity];
         const glow = RARITY_GLOW[poi.rarity];
@@ -285,7 +430,18 @@ export class Renderer {
         break;
       }
       case 'gate':
+      case 'portal':
         this.drawGate(run, poi, x, y);
+        break;
+      case 'vendor': {
+        const npc = S.npc[poi.shop] || S.merchant;
+        ctx.drawImage(this.shadow(6), x - 7, y - 3);
+        const facing = run.player.x < x ? npc.l : npc.r;
+        ctx.drawImage(facing, x - 8, y - 15 + (Math.floor(this.time * 2 + x) % 2));
+        break;
+      }
+      case 'board':
+        ctx.drawImage(S.noticeBoard, x - 9, y - 18);
         break;
       case 'camp': {
         // Campfire.
@@ -325,7 +481,7 @@ export class Renderer {
     ctx.ellipse(x, cy, 8, 12, 0, 0, Math.PI * 2);
     ctx.fill();
     // Swirling ring.
-    const ring = flicker ? ['#e0384a', '#8e1f2c'] : ['#b68cff', '#7a3fc0', '#f4f2ff'];
+    const ring = flicker ? ['#e0384a', '#8e1f2c'] : poi.toll ? ['#ffd36b', '#c2561f', '#fff1c4'] : ['#b68cff', '#7a3fc0', '#f4f2ff'];
     for (let i = 0; i < 28; i++) {
       const a = this.time * 2.2 + (i / 28) * Math.PI * 2;
       const r = 1 - (i % 3) * 0.12;
@@ -335,22 +491,17 @@ export class Renderer {
     for (let i = 0; i < 8; i++) {
       const a = -this.time * 3 + (i / 8) * Math.PI * 2;
       const r = 3 + Math.sin(this.time * 2 + i) * 2;
-      ctx.fillStyle = '#7a3fc0';
+      ctx.fillStyle = poi.toll ? '#c2561f' : '#7a3fc0';
       ctx.fillRect(Math.round(x + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r * 1.4), 1, 1);
     }
-    if (Math.random() < 0.3) run.effects.particle(x + (Math.random() - 0.5) * 16, cy + (Math.random() - 0.5) * 22, 0, -14, 0.7, '#b68cff', 1, 0, 0.5);
+    if (Math.random() < 0.3) run.effects.particle(x + (Math.random() - 0.5) * 16, cy + (Math.random() - 0.5) * 22, 0, -14, 0.7, poi.toll ? '#ffd36b' : '#b68cff', 1, 0, 0.5);
   }
 
   drawEnemy(run, e) {
     const ctx = this.ctx;
     const S = this.S;
     const scale = e.def.scale || 1;
-    let frames;
-    if (e.champion) frames = S.champion;
-    else if (e.def.sprite === 'skeleton') frames = e.elite ? S.skeletonElite : S.skeleton;
-    else if (e.def.sprite === 'slime') frames = e.elite ? S.slimeElite : S.slime;
-    else if (e.def.sprite === 'slimeling') frames = e.elite ? S.slimelingElite : S.slimeling;
-    else frames = e.elite ? S.wolfElite : S.wolf;
+    const frames = S.enemyFrames(e.def.sprite, e.champion ? 'champion' : run.biome.skin, e.elite && !e.champion);
 
     let fi = Math.floor(e.animT * 5) % 2;
     if (e.state === 'windup' && frames.length > 2) fi = 2;
@@ -377,9 +528,15 @@ export class Renderer {
 
     const x = Math.round(e.x);
     const y = Math.round(e.y);
-    // Spawn: rise out of the ground.
+    // Spawn: rise out of the ground (fade in while growing up from a squashed start).
     let alpha = 1;
-    if (e.spawnT > 0) alpha = clamp(1 - e.spawnT / 0.35, 0, 1);
+    if (e.spawnT > 0) {
+      const t = clamp(1 - e.spawnT / 0.35, 0, 1);
+      alpha = t;
+      h = Math.max(2, Math.round(h * (0.35 + 0.65 * t)));
+      w = Math.round(w * (1.25 - 0.25 * t));
+      if (Math.random() < 0.4) run.effects.particle(x + (Math.random() - 0.5) * w, y, (Math.random() - 0.5) * 20, -10, 0.35, '#3a3350', 1, 30, 1);
+    }
     ctx.globalAlpha = alpha;
     ctx.drawImage(this.shadow(Math.round(e.radius * scale * 0.9 + 2)), x - Math.round(e.radius * scale * 0.9 + 3), y - 3);
     if (e.elite || e.cursed) {
@@ -388,8 +545,15 @@ export class Renderer {
       ctx.drawImage(S.glow[e.champion ? 'red' : 'purple'], x - gs / 2, y - h / 2 - gs / 2 - 2, gs, gs);
       ctx.globalAlpha = alpha;
     }
-    ctx.drawImage(img, Math.round(x - w / 2), Math.round(y - h + 1 + yOff), w, h);
+    const ox = Math.round(x - w / 2);
+    const oy = Math.round(y - h + 1 + yOff);
+    const sx = w / b.w;
+    const sy = h / b.h;
+    const out = !flashing && (e.facing < 0 ? b.outL : b.outR);
+    if (out) ctx.drawImage(out, ox - sx, oy - sy, w + 2 * sx, h + 2 * sy);
+    else ctx.drawImage(img, ox, oy, w, h);
     ctx.globalAlpha = 1;
+    if (b.eyes.length && !flashing) this.eyes.push({ e, b, ox, oy, sx, sy, color: e.champion ? '#ff4a3a' : frames.eyeColor, alpha });
 
     if (e.elite && !e.champion && Math.random() < 0.12) run.effects.particle(x + (Math.random() - 0.5) * w, y - Math.random() * h, 0, -12, 0.5, '#b68cff', 1, 0, 0.5);
 
@@ -432,20 +596,25 @@ export class Renderer {
       ctx.drawImage(this.shadow(4), x - 5, Math.round(pk.y) - 3);
       let img;
       if (item.kind === 'weapon') img = S.weaponIcons[`${item.type}|${item.rarity}`];
-      else if (item.kind === 'relic') img = S.icon(item.icon, item.rarity);
+      else if (item.kind === 'relic' || item.kind === 'armor' || item.kind === 'skill') img = S.icon(item.icon, item.rarity);
       else img = S.potion;
       ctx.drawImage(img, x - Math.floor(img.width / 2), y - img.height - 2 + bob);
     }
   }
 
   drawPlayer(run, p) {
+    if (p.sprintT > 0 && Math.random() < 0.6) run.effects.particle(p.x + (Math.random() - 0.5) * 8, p.y - 2, (Math.random() - 0.5) * 10, -20, 0.35, Math.random() < 0.5 ? '#ff9a3c' : '#ffd36b', 1, -10, 1);
+    if (p.stormCharged && Math.random() < 0.5) {
+      const a = Math.random() * Math.PI * 2;
+      run.effects.particle(p.x + Math.cos(a) * 7, p.y - 8 + Math.sin(a) * 9, 0, 0, 0.18, Math.random() < 0.5 ? '#8fd3ff' : '#f4f2ff', 1, 0, 0);
+    }
     const ctx = this.ctx;
     const S = this.S;
     const x = Math.round(p.x);
     const y = Math.round(p.y);
     if (p.dead && run.ended && run.result && run.result.outcome === 'escaped') return;
     ctx.drawImage(this.shadow(5), x - 6, y - 3);
-    const b = S[p.currentSpriteName()];
+    const b = S.playerSprites(p.gear)[p.currentSpriteName()];
     const blink = p.iframes > 0 && p.dashT <= 0 && Math.floor(this.time * 20) % 2 === 0;
     const flash = p.hurtFlash > 0;
     const img = flash ? (p.facing < 0 ? b.flashL : b.flashR) : p.facing < 0 ? b.l : b.r;
@@ -459,6 +628,19 @@ export class Renderer {
     ctx.drawImage(img, x - 8, y - 15 + bob);
     ctx.globalAlpha = 1;
 
+    // Overhead HP bar when hurt, so you can read your health without looking away.
+    const hpPct = p.hp / p.stats.maxHp;
+    if (hpPct < 0.999 && !p.dead) {
+      ctx.fillStyle = '#07060c';
+      ctx.fillRect(x - 8, y - 21, 16, 3);
+      ctx.fillStyle = hpPct < 0.3 ? (Math.floor(this.time * 6) % 2 ? '#ff5a5a' : '#8e1f2c') : '#e0384a';
+      ctx.fillRect(x - 7, y - 20, Math.max(1, Math.round(14 * hpPct)), 1);
+    }
+    if (run.frost > 2) {
+      ctx.globalAlpha = Math.min(0.6, (run.frost - 2) * 0.25);
+      ctx.drawImage(S.glow.blue, x - 12, y - 20, 24, 24);
+      ctx.globalAlpha = 1;
+    }
     // Weapon.
     const wpn = S.weapons[p.weapon.sprite][p.weapon.rarity];
     const hx = p.facing > 0 ? x - 8 + PLAYER_HAND.x : x + 8 - PLAYER_HAND.x - 1;
@@ -535,16 +717,35 @@ export class Renderer {
       }
       ctx.globalAlpha = 1;
     }
-    // Shadow-wave projectiles.
+    // Enemy arrows.
+    for (const pr of run.combat.enemyProjectiles) {
+      const len = 6;
+      const l = Math.hypot(pr.vx, pr.vy) || 1;
+      const dx = pr.vx / l;
+      const dy = pr.vy / l;
+      ctx.fillStyle = '#d9d2bf';
+      for (let i = 0; i < len; i++) ctx.fillRect(Math.round(pr.x - dx * i), Math.round(pr.y - dy * i), 1, 1);
+      ctx.fillStyle = '#ff5a5a';
+      ctx.fillRect(Math.round(pr.x), Math.round(pr.y), 1, 1);
+    }
+    // Shadow waves (crescents) and spectral bolts.
     for (const pr of run.combat.projectiles) {
-      ctx.fillStyle = '#b68cff';
-      for (let i = -4; i <= 4; i++) {
+      if (pr.kind === 'spectral') {
+        ctx.fillStyle = '#c4e4f5';
+        for (let i = 0; i < 6; i++) ctx.fillRect(Math.round(pr.x - Math.cos(pr.angle) * i), Math.round(pr.y - Math.sin(pr.angle) * i), i < 2 ? 2 : 1, i < 2 ? 2 : 1);
+        ctx.fillStyle = '#f4f2ff';
+        ctx.fillRect(Math.round(pr.x), Math.round(pr.y), 1, 1);
+        continue;
+      }
+      const span = pr.big ? 8 : 4;
+      ctx.fillStyle = pr.big ? '#c48cff' : '#b68cff';
+      for (let i = -span; i <= span; i++) {
         const a = pr.angle + Math.PI / 2;
-        const bend = Math.abs(i) * 0.6;
+        const bend = Math.abs(i) * (pr.big ? 0.45 : 0.6);
         ctx.fillRect(Math.round(pr.x + Math.cos(a) * i - Math.cos(pr.angle) * bend), Math.round(pr.y + Math.sin(a) * i - Math.sin(pr.angle) * bend), 2, 2);
       }
       ctx.fillStyle = '#f4f2ff';
-      ctx.fillRect(Math.round(pr.x), Math.round(pr.y), 1, 1);
+      ctx.fillRect(Math.round(pr.x), Math.round(pr.y), pr.big ? 2 : 1, 1);
     }
     // Rings.
     for (const r of fx.rings) {
@@ -589,13 +790,105 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  /** Skill leftovers on the ground: Thunderstride lines, Wildfire flames, the Rift Anchor. */
+  drawSkillZones(run) {
+    const ctx = this.ctx;
+    const c = run.combat;
+    for (const z of c.zapLines || []) {
+      const t = z.life / z.max;
+      const n = Math.max(2, Math.round(Math.hypot(z.x1 - z.x0, z.y1 - z.y0) / 5));
+      ctx.fillStyle = Math.floor(this.time * 20) % 2 ? '#c4e4f5' : '#8fd3ff';
+      ctx.globalAlpha = 0.35 + 0.65 * t;
+      for (let i = 0; i <= n; i++) {
+        const k = i / n;
+        const jx = (Math.random() - 0.5) * 3;
+        const jy = (Math.random() - 0.5) * 3;
+        ctx.fillRect(Math.round(z.x0 + (z.x1 - z.x0) * k + jx), Math.round(z.y0 + (z.y1 - z.y0) * k + jy + 4), 1, 1);
+      }
+    }
+    for (const f of c.firePatches || []) {
+      if (!this.inView(f.x, f.y, 8)) continue;
+      const t = f.life / f.max;
+      ctx.globalAlpha = Math.min(1, t * 2);
+      for (let i = 0; i < 3; i++) {
+        const h = 1 + Math.abs(Math.sin(this.time * 10 + f.x + i * 2)) * 3 * t;
+        ctx.fillStyle = i === 1 ? '#ffd36b' : '#ff9a3c';
+        ctx.fillRect(Math.round(f.x - 2 + i * 2), Math.round(f.y - h), 1, Math.ceil(h));
+      }
+    }
+    ctx.globalAlpha = 1;
+    const a = run.player.anchor;
+    if (a) {
+      const pulse = 8 + Math.sin(this.time * 6) * 1.5;
+      ctx.fillStyle = '#b68cff';
+      for (let i = 0; i < 16; i++) {
+        const ang = (i / 16) * Math.PI * 2 + this.time * 2;
+        ctx.fillRect(Math.round(a.x + Math.cos(ang) * pulse), Math.round(a.y - 2 + Math.sin(ang) * pulse * 0.6), 1, 1);
+      }
+      ctx.fillStyle = '#f4f2ff';
+      ctx.fillRect(Math.round(a.x), Math.round(a.y - 2), 1, 1);
+      // A faint tether back to the anchor.
+      const p = run.player;
+      ctx.fillStyle = '#7a3fc0';
+      const n = Math.round(Math.hypot(p.x - a.x, p.y - a.y) / 6);
+      for (let i = 1; i < n; i++) if ((i + Math.floor(this.time * 8)) % 2) ctx.fillRect(Math.round(a.x + ((p.x - a.x) * i) / n), Math.round(a.y - 2 + ((p.y - a.y) * i) / n), 1, 1);
+    }
+  }
+
+  /** Lasting marks on the ground (bones, blood, scorch, footprints), fading out at the end. */
+  drawDecals(run) {
+    const ctx = this.ctx;
+    const D = this.S.decals;
+    for (const d of run.effects.decals) {
+      if (!this.inView(d.x, d.y, 12)) continue;
+      const set = D[d.kind];
+      if (!set) continue;
+      const img = set[d.variant % set.length];
+      ctx.globalAlpha = Math.min(1, d.life / 8) * (d.kind === 'step' ? 0.55 : 0.8);
+      ctx.drawImage(img, d.x - (img.width >> 1), d.y - (img.height >> 1));
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Enemy eyes glow through the darkness, so you can see what's out there
+   * before it reaches your light.
+   */
+  drawEyes(run, cx, cy) {
+    const ctx = this.ctx;
+    const p = run.player;
+    const lr = p.stats.lightRadius;
+    const dark = clamp((run.phase.darkness + (run.biome ? run.biome.darkness : 0)) * 1.8, 0, 1);
+    if (dark <= 0) return;
+    for (const it of this.eyes) {
+      const e = it.e;
+      const d = Math.hypot(e.x - p.x, e.y - p.y);
+      const a = clamp((d - lr * 0.45) / (lr * 0.4), 0, 1) * dark * it.alpha;
+      if (a < 0.05) continue;
+      if (Math.sin(this.time * 0.9 + e.id * 7.31) > 0.985) continue; // an occasional blink
+      ctx.fillStyle = it.color;
+      const flip = e.facing < 0;
+      const pw = Math.max(1, Math.round(it.sx));
+      const ph = Math.max(1, Math.round(it.sy));
+      for (const [ex, ey] of it.b.eyes) {
+        const px = Math.round(it.ox + (flip ? it.b.w - 1 - ex : ex) * it.sx - cx);
+        const py = Math.round(it.oy + ey * it.sy - cy);
+        ctx.globalAlpha = a * 0.22; // faint halo
+        ctx.fillRect(px - 1, py - 1, pw + 2, ph + 2);
+        ctx.globalAlpha = a;
+        ctx.fillRect(px, py, pw, ph);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   drawLighting(run, cx, cy) {
     const lctx = this.lctx;
     const S = this.S;
     const W = this.W;
     const H = this.H;
     const p = run.player;
-    let dark = run.phase.darkness;
+    let dark = run.phase.darkness + (run.biome ? run.biome.darkness : 0);
     if (run.timeLeft <= 60) dark += 0.06 + Math.sin(this.time * 4) * 0.03;
     lctx.globalCompositeOperation = 'source-over';
     lctx.clearRect(0, 0, W, H);
@@ -607,22 +900,41 @@ export class Renderer {
       const sy = y - cy;
       if (sx < -r || sy < -r || sx > W + r || sy > H + r) return;
       lctx.globalAlpha = a;
-      lctx.drawImage(S.light, sx - r, sy - r, r * 2, r * 2);
+      const img = S.lightAt(r);
+      lctx.drawImage(img, Math.round(sx - img.width / 2), Math.round(sy - img.height / 2));
     };
     const flick = 0.92 + Math.sin(this.time * 13) * 0.04 + Math.sin(this.time * 7.3) * 0.04;
     light(p.x, p.y - 6, p.stats.lightRadius * (run.timeLeft <= 60 ? 0.9 : 1), 1);
     for (const t of run.map.torches) light(t.x, t.y - 8, 34 * flick, 0.9);
     for (const poi of run.pois) {
-      if (poi.type === 'gate' && poi.open) light(poi.x, poi.y - 12, 46, 1);
+      if ((poi.type === 'gate' || poi.type === 'portal') && poi.open) light(poi.x, poi.y - 12, 46, 1);
+      else if (poi.type === 'vendor') light(poi.x, poi.y - 8, 30, 0.8);
       else if (poi.type === 'merchant') light(poi.x, poi.y - 8, 34, 0.9);
       else if (poi.type === 'camp') light(poi.x, poi.y, 40 * flick, 1);
+      else if (poi.type === 'brazier' && poi.lit) light(poi.x, poi.y - 10, 34 * flick, 0.9);
       else if (poi.type === 'chest' && !poi.opened && RARITY_INFO[poi.rarity].tier >= 2) light(poi.x, poi.y - 6, 20, 0.6);
       else if (poi.type === 'shrine' && !poi.used) light(poi.x, poi.y - 12, 24, 0.7);
       else if (poi.type === 'mystery' && !poi.used) light(poi.x, poi.y - 6, 22, 0.7);
     }
     for (const bm of run.effects.beams) light(bm.x, bm.y - 20, 30, bm.life / bm.max);
+    for (const r of run.combat.runes) light(r.x, r.y, r.radius + 8, 0.5 + 0.5 * Math.min(1, r.t / r.delay));
+    if (run.map.biome.palette === 'ash') {
+      const map = run.map;
+      const x0 = Math.max(0, Math.floor(cx / TILE) - 1);
+      const y0 = Math.max(0, Math.floor(cy / TILE) - 1);
+      const x1 = Math.min(map.n - 1, Math.floor((cx + W) / TILE) + 1);
+      const y1 = Math.min(map.n - 1, Math.floor((cy + H) / TILE) + 1);
+      for (let ty = y0; ty <= y1; ty += 2)
+        for (let tx = x0; tx <= x1; tx += 2) if (map.tiles[ty * map.n + tx] === T.LAVA) light(tx * TILE + 8, ty * TILE + 8, 26, 0.35);
+    }
     for (const r of run.effects.rings) light(r.x, r.y, r.radius, (r.life / r.max) * 0.8);
     for (const pr of run.combat.projectiles) light(pr.x, pr.y, 16, 0.6);
+    for (const z of run.combat.zapLines) light((z.x0 + z.x1) / 2, (z.y0 + z.y1) / 2, 26, 0.6 * (z.life / z.max));
+    for (let i = 0; i < run.combat.firePatches.length; i += 3) {
+      const f = run.combat.firePatches[i];
+      light(f.x, f.y - 2, 18, 0.6 * (f.life / f.max));
+    }
+    if (p.anchor) light(p.anchor.x, p.anchor.y, 22, 0.7);
     lctx.globalAlpha = 1;
     lctx.globalCompositeOperation = 'source-over';
     this.ctx.drawImage(this.light, 0, 0);
@@ -638,7 +950,8 @@ export class Renderer {
     }
     ctx.globalAlpha = 0.25;
     for (const poi of run.pois) {
-      if (poi.type === 'gate' && poi.open) ctx.drawImage(S.glow.purple, poi.x - cx - 26, poi.y - cy - 40, 52, 52);
+      if ((poi.type === 'gate' || poi.type === 'portal') && poi.open) ctx.drawImage(poi.toll ? S.glow.gold : S.glow.purple, poi.x - cx - 26, poi.y - cy - 40, 52, 52);
+      else if (poi.type === 'brazier' && poi.lit) ctx.drawImage(S.glow.orange, poi.x - cx - 18, poi.y - cy - 30, 36, 36);
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
@@ -655,6 +968,62 @@ export class Renderer {
       v.fillRect(0, 0, this.W, this.H);
     }
     this.ctx.drawImage(this.vignette, 0, 0);
+  }
+
+  /** Name tags on nearby points of interest so it's clear what everything is. */
+  drawLabels(run) {
+    const ctx = this.ctx;
+    const p = run.player;
+    const range = run.biome && run.biome.id === 'town' ? 400 : 95;
+    for (const poi of run.pois) {
+      if (!poi.discovered) continue;
+      const d2 = (poi.x - p.x) ** 2 + (poi.y - p.y) ** 2;
+      if (d2 > range * range) continue;
+      let label = null;
+      let color = '#c9c6dc';
+      let lift = 20;
+      if (poi.type === 'gate') {
+        label = !poi.open ? 'COLLAPSED' : poi.toll ? 'TOLL GATE' : 'RIFT GATE';
+        color = !poi.open ? '#6d6588' : poi.toll ? '#ffd36b' : '#d7b8ff';
+        lift = 36;
+      } else if (poi.type === 'landmark') {
+        label = poi.name.toUpperCase();
+        color = '#e6c8a6';
+        lift = Math.min(poi.y - poi.labelY, 48);
+      } else if (poi.type === 'chest' && !poi.opened) {
+        label = poi.cursed ? 'CURSED CHEST' : poi.treasure ? 'TREASURE' : 'CHEST';
+        color = RARITY_INFO[poi.rarity].color;
+        lift = 20;
+      } else if (poi.type === 'shrine' && !poi.used) {
+        label = 'SHRINE';
+        color = '#ff9a9a';
+        lift = 26;
+      } else if (poi.type === 'mystery' && !poi.used) {
+        label = 'MYSTERY';
+        color = '#d7a8ff';
+        lift = 30;
+      } else if (poi.type === 'merchant') {
+        label = 'MERCHANT';
+        color = '#ffd36b';
+        lift = 32;
+      } else if (poi.type === 'vendor') {
+        label = poi.label;
+        color = poi.color || '#ffd36b';
+        lift = 30;
+      } else if (poi.type === 'board') {
+        label = 'RECORDS';
+        color = '#c9c6dc';
+        lift = 24;
+      } else if (poi.type === 'portal') {
+        label = 'RIFT PORTAL';
+        color = '#d7b8ff';
+        lift = 40;
+      }
+      if (!label) continue;
+      ctx.globalAlpha = range < 100 && d2 > 70 * 70 ? 0.55 : 1;
+      drawText(ctx, label, Math.round(poi.x), Math.round(poi.y - lift), color);
+    }
+    ctx.globalAlpha = 1;
   }
 
   drawNumbers(run) {
@@ -677,8 +1046,9 @@ export class Renderer {
     const targets = [];
     let gate = null;
     let gd = Infinity;
+    const freeGate = run.pois.some((g) => g.type === 'gate' && g.open && !g.toll);
     for (const poi of run.pois) {
-      if (poi.type === 'gate' && poi.open) {
+      if (poi.type === 'gate' && poi.open && !(poi.toll && freeGate)) {
         const d = (poi.x - p.x) ** 2 + (poi.y - p.y) ** 2;
         if (d < gd) {
           gd = d;

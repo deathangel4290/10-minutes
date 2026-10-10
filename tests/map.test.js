@@ -7,7 +7,7 @@ test('every point of interest is reachable from the spawn', () => {
     const m = new GameMap(seed * 7919);
     assert.ok(m.isOpenReachable(m.spawn.x, m.spawn.y), `spawn blocked (seed ${seed})`);
     for (const p of m.pois) assert.ok(m.isOpenReachable(p.x, p.y), `${p.type} unreachable (seed ${seed})`);
-    assert.equal(m.pois.filter((p) => p.type === 'gate').length, 3);
+    assert.equal(m.pois.filter((p) => p.type === 'gate').length, 4, 'three Rift Gates and a Toll Gate');
     assert.ok(m.pois.filter((p) => p.type === 'chest').length >= 10);
   }
 });

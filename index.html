@@ -31,6 +31,7 @@
           <button data-btn="potion" id="btn-potion" class="act act-sm" aria-label="Drink potion"><img alt="" /><span class="badge"></span></button>
           <button data-btn="nova" id="btn-nova" class="act act-md" aria-label="Eclipse Nova"><span class="fill"></span><img alt="" /></button>
           <button data-btn="dash" id="btn-dash" class="act act-md" aria-label="Dash"><span class="cd"></span><img alt="" /></button>
+          <button data-btn="skill" id="btn-skill" class="act act-md hidden" aria-label="Skill"><span class="cd"></span><img alt="" /><span class="badge"></span></button>
           <button data-btn="attack" id="btn-attack" class="act act-lg" aria-label="Attack"><img alt="" /></button>
         </div>
       </div>
@@ -45,20 +46,33 @@
           <div class="hud-timer">
             <div class="timer">10:00</div>
             <div class="danger">LOW DANGER</div>
+            <div class="objective"></div>
           </div>
           <div class="hud-right">
             <div class="hud-row">
               <div class="gold"><img alt="" /><span>0</span></div>
+              <button id="btn-gear" class="icon-btn" aria-label="Equipment"><img alt="" /></button>
               <button id="btn-pause" class="icon-btn" aria-label="Pause">II</button>
             </div>
             <canvas id="minimap" width="80" height="80" aria-label="Minimap"></canvas>
           </div>
         </div>
+        <div id="status"></div>
         <div id="champion-bar" class="hidden"><span>BONE COLOSSUS</span><div class="bar-track"><div class="bar-fill"></div></div></div>
-        <div id="toasts"></div>
-        <div id="banner" class="hidden"><div class="banner-title"></div><div class="banner-sub"></div></div>
         <div id="countdown"></div>
         <div id="pickup-card" class="hidden"></div>
+      </div>
+
+      <div id="toasts"></div>
+      <div id="banner" class="hidden"><div class="banner-title"></div><div class="banner-sub"></div></div>
+
+      <div id="town-hud" class="hidden">
+        <div class="town-name">EMBERFALL<span>Walk to a vendor to shop · Portal to the north</span></div>
+        <div class="town-right">
+          <span class="ember-pill"><img id="town-ember-icon" alt="" /> <span id="town-embers">0</span></span>
+          <button class="icon-btn" data-town="settings" aria-label="Settings">⚙</button>
+          <button class="icon-btn" data-town="title" aria-label="Back to title">✕</button>
+        </div>
       </div>
 
       <div id="screen" class="hidden"></div>

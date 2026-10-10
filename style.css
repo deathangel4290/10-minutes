@@ -350,6 +350,13 @@ button {
   letter-spacing: -1px;
 }
 
+.icon-btn img {
+  width: 16px;
+  height: 16px;
+  display: block;
+  margin: auto;
+}
+
 #minimap {
   width: 72px;
   height: 72px;
@@ -357,6 +364,52 @@ button {
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.6);
   image-rendering: pixelated;
+}
+
+.objective {
+  font-family: var(--font-small);
+  font-size: 6px;
+  color: var(--purple-hi);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+#status {
+  position: absolute;
+  top: calc(84px + var(--safe-top));
+  left: calc(6px + var(--safe-left));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.chip {
+  font-family: var(--font-small);
+  font-size: 7px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+}
+
+.chip.danger {
+  color: #fff;
+  background: rgba(142, 31, 44, 0.85);
+  border-color: var(--red-hi);
+  animation: pulse-red 0.5s infinite alternate;
+}
+
+.chip.warn {
+  color: var(--orange-hi);
+  border-color: #a8742a;
+}
+
+.chip.frost {
+  color: #e8f6ff;
+  background: rgba(31, 63, 122, 0.85);
+  border-color: #8fd3ff;
 }
 
 #champion-bar {
@@ -382,6 +435,8 @@ button {
 }
 
 #toasts {
+  z-index: 4;
+  pointer-events: none;
   position: absolute;
   top: calc(112px + var(--safe-top));
   left: 0;
@@ -433,6 +488,8 @@ button {
 }
 
 #banner {
+  z-index: 4;
+  pointer-events: none;
   position: absolute;
   top: 30%;
   left: 0;
@@ -587,6 +644,125 @@ button {
   color: var(--red-hi);
 }
 
+/* ── Town HUD ─────────────────────────────────────────── */
+#town-hud {
+  position: absolute;
+  top: calc(6px + var(--safe-top));
+  left: calc(8px + var(--safe-left));
+  right: calc(8px + var(--safe-right));
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.town-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--orange-hi);
+  text-shadow: 0 0 10px rgba(255, 154, 60, 0.6), 2px 2px 0 #000;
+}
+
+.town-name span {
+  display: block;
+  font-family: var(--font-small);
+  font-size: 7px;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  text-shadow: 1px 1px 0 #000;
+}
+
+.town-right {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  pointer-events: auto;
+}
+
+#controls.town-mode #btn-attack,
+#controls.town-mode #btn-nova,
+#controls.town-mode #btn-potion,
+#controls.town-mode #btn-skill {
+  display: none;
+}
+
+.vendor-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.vendor-head .modal-title,
+.vendor-head .modal-sub {
+  text-align: left;
+  margin: 0;
+}
+
+.vendor-head img {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  background: radial-gradient(circle, rgba(255, 154, 60, 0.25), transparent 70%);
+}
+
+.regions {
+  display: grid;
+  gap: 8px;
+}
+
+.region {
+  position: relative;
+  background: #0d0a17;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--rc);
+  border-radius: 9px;
+  padding: 9px 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.region.locked {
+  opacity: 0.55;
+}
+
+.region-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.region .nm {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--rc);
+}
+
+.region .ds {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.25;
+}
+
+.danger-skulls {
+  color: var(--red-hi);
+  letter-spacing: 1px;
+  font-size: 12px;
+}
+
+.region-meta {
+  font-family: var(--font-small);
+  font-size: 7px;
+  color: var(--text-faint);
+}
+
+.region .btn {
+  justify-self: end;
+}
+
 /* ── Touch controls ──────────────────────────────────── */
 #controls {
   position: absolute;
@@ -631,8 +807,8 @@ button {
   position: absolute;
   right: calc(14px + var(--safe-right));
   bottom: calc(26px + var(--safe-bottom));
-  width: 190px;
-  height: 170px;
+  width: 200px;
+  height: 160px;
   pointer-events: none;
 }
 
@@ -687,13 +863,39 @@ button {
 }
 
 #btn-nova {
-  right: 74px;
-  bottom: 72px;
+  right: 84px;
+  bottom: 76px;
 }
 
 #btn-potion {
+  right: 150px;
+  bottom: 92px;
+}
+
+/* The Skill button appears above Attack once you find a skill. */
+#btn-skill {
   right: 14px;
-  bottom: 100px;
+  bottom: 98px;
+}
+
+#btn-skill.ready {
+  border-color: var(--sk, var(--purple-hi));
+  box-shadow: 0 0 0 2px #000, 0 0 14px var(--sk, rgba(196, 140, 255, 0.9));
+}
+
+#btn-skill.armed {
+  animation: skill-armed 0.5s infinite alternate;
+}
+
+@keyframes skill-armed {
+  to {
+    box-shadow: 0 0 0 2px #000, 0 0 22px var(--sk, #b68cff);
+    transform: scale(1.06);
+  }
+}
+
+#btn-skill.empty img {
+  opacity: 0.45;
 }
 
 .act .cd {
@@ -751,8 +953,13 @@ button {
   background: rgba(5, 3, 10, 0.72);
   display: flex;
   flex-direction: column;
-  justify-content: center;
   animation: fade-in 0.15s ease-out;
+}
+
+/* Centered when it fits, scrollable from the top when it doesn't. */
+#modal > * {
+  margin-top: auto;
+  margin-bottom: auto;
 }
 
 @keyframes fade-in {
@@ -962,6 +1169,33 @@ button {
 
 .tag.syn {
   background: #3a2810;
+  color: var(--orange-hi);
+}
+
+.tag.evo {
+  color: #1a0d05;
+  background: linear-gradient(#ffd36b, #ff9a3c);
+  border-color: #ffd36b;
+}
+
+.tag.recipe {
+  color: var(--orange-hi);
+  border-color: #8a5a20;
+  background: rgba(60, 30, 10, 0.6);
+}
+
+.up-card.r-evolution {
+  border-color: #ffab40;
+  background: linear-gradient(#3a2410, #1a1008);
+  box-shadow: 0 3px 0 #000, 0 0 18px rgba(255, 154, 60, 0.45);
+}
+
+.up-card.r-evolution .nm {
+  color: var(--orange-hi);
+}
+
+.build-chip.evo {
+  border-color: #ffab40;
   color: var(--orange-hi);
 }
 
@@ -1372,10 +1606,15 @@ button {
 }
 
 /* Results */
-.results {
+.results,
+.res-a,
+.res-b {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.results {
   min-height: 100%;
   justify-content: center;
 }
@@ -1547,6 +1786,127 @@ button {
   vertical-align: middle;
 }
 
+/* Equipment */
+.paperdoll {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  grid-template-rows: auto auto auto;
+  gap: 6px 10px;
+  align-items: center;
+  justify-items: center;
+  margin: 4px 0 8px;
+}
+
+.paperdoll .doll {
+  grid-column: 2;
+  grid-row: 2;
+  width: 96px;
+  height: 96px;
+  image-rendering: pixelated;
+  background: radial-gradient(circle, rgba(143, 79, 214, 0.25), transparent 70%);
+}
+
+.slot {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.slot .box {
+  width: 50px;
+  height: 50px;
+  border-radius: 8px;
+  background: #0a0712;
+  border: 2px solid var(--line);
+  display: grid;
+  place-items: center;
+}
+
+.slot .box img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.slot .lab {
+  font-family: var(--font-small);
+  font-size: 7px;
+  color: var(--text-faint);
+}
+
+.slot.sel .box {
+  box-shadow: 0 0 0 2px var(--orange-hi);
+}
+
+.s-helm {
+  grid-column: 2;
+  grid-row: 1;
+}
+.s-weapon {
+  grid-column: 1;
+  grid-row: 2;
+}
+.s-chest {
+  grid-column: 3;
+  grid-row: 2;
+}
+.s-boots {
+  grid-column: 2;
+  grid-row: 3;
+}
+.s-skill {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.gear-detail {
+  background: #0d0a17;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.3;
+  margin-bottom: 8px;
+}
+
+.gear-detail .nm {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.gear-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 10px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.gear-stats div {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dashed #2a2140;
+  padding: 2px 0;
+}
+
+.gear-stats .k {
+  color: var(--text-dim);
+}
+
+.gear-stats .v {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bag-list {
+  display: grid;
+  gap: 5px;
+}
+
 /* Settings */
 .settings {
   display: grid;
@@ -1634,4 +1994,211 @@ button {
     transform: scale(0.9);
     transform-origin: bottom right;
   }
+}
+
+/* ── Landscape (sideways) ─────────────────────────────── */
+/* Turning the phone sideways switches to this layout: the game fills the
+   width, the HUD stays a slim top strip and menus split into two columns. */
+body:not(.landscape) .only-wide,
+body.landscape .only-tall {
+  display: none;
+}
+
+body.landscape #app {
+  width: 100%;
+}
+
+body.landscape #status {
+  top: calc(64px + var(--safe-top));
+}
+
+body.landscape #champion-bar {
+  top: calc(64px + var(--safe-top));
+}
+
+body.landscape #toasts {
+  top: calc(86px + var(--safe-top));
+}
+
+body.landscape #pickup-card {
+  bottom: calc(10px + var(--safe-bottom));
+  width: min(40%, 320px);
+}
+
+body.landscape .btn-cluster {
+  bottom: calc(14px + var(--safe-bottom));
+}
+
+body.landscape #screen,
+body.landscape #modal {
+  padding: calc(8px + var(--safe-top)) calc(16px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+
+body.landscape .panel {
+  width: 100%;
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 12px 14px;
+}
+
+body.landscape .panel.wide {
+  max-width: 780px;
+}
+
+body.landscape .panel.split {
+  max-width: 640px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 16px;
+  align-items: center;
+}
+
+body.landscape .panel.split.wide {
+  max-width: 780px;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: start;
+}
+
+/* The left column stays put while a long list scrolls beside it. */
+body.landscape .split.wide .col-a {
+  position: sticky;
+  top: 0;
+}
+
+body.landscape .split .col-b > .btn-row:first-child {
+  margin-top: 0;
+}
+
+body.landscape .modal-title {
+  font-size: 22px;
+}
+
+body.landscape .modal-sub {
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+body.landscape .btn {
+  padding: 9px 12px;
+  font-size: 15px;
+}
+
+body.landscape .btn-small {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+body.landscape .btn-row {
+  gap: 6px;
+  margin-top: 8px;
+}
+
+body.landscape .split.wide .vendor-head {
+  flex-direction: column;
+  text-align: center;
+}
+
+body.landscape .split.wide .vendor-head .modal-title,
+body.landscape .split.wide .vendor-head .modal-sub {
+  text-align: center;
+}
+
+body.landscape .event-art {
+  height: 80px;
+}
+
+body.landscape .event-art img {
+  height: 70px;
+}
+
+/* Level up: the three choices side by side. */
+body.landscape .lvl-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+body.landscape .up-card {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-content: start;
+  text-align: center;
+  padding: 12px 10px;
+}
+
+body.landscape .up-card .meta {
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+body.landscape .regions {
+  grid-template-columns: 1fr 1fr;
+}
+
+body.landscape .records-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.landscape .settings {
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+body.landscape .set-row input[type='range'] {
+  width: 110px;
+}
+
+body.landscape .paperdoll .doll {
+  width: 80px;
+  height: 80px;
+}
+
+/* Title: the logo over the sky on the left, the buttons on the right. */
+body.landscape .title-wrap {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-around;
+  gap: 24px;
+}
+
+body.landscape .logo {
+  margin-top: 0;
+  align-self: flex-start;
+  padding-top: 4vh;
+}
+
+body.landscape .logo h1 {
+  font-size: clamp(34px, 11vh, 56px);
+}
+
+body.landscape .title-bottom {
+  width: min(44%, 380px);
+}
+
+/* Results: how the run went on the left, the loot and what's next on the right. */
+body.landscape .results {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 18px;
+  align-items: center;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+body.landscape .res-a,
+body.landscape .res-b {
+  gap: 8px;
+}
+
+body.landscape .res-title {
+  font-size: 38px;
+}
+
+body.landscape .res-b .btn-row {
+  grid-template-columns: 1fr 1fr;
+}
+
+body.landscape .embers-rows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
 }

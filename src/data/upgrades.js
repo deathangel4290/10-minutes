@@ -92,7 +92,39 @@ export const UPGRADES = [
     desc: (r) => `Execute normal enemies below ${pct(0.12 * r)} HP`, mods: [{ stat: 'executeThreshold', value: 0.12 }] },
 ];
 
-export const UPGRADE_BY_ID = Object.fromEntries(UPGRADES.map((u) => [u.id, u]));
+// ── Evolutions ───────────────────────────────────────────
+// Max out one upgrade while owning its partner and the next level-up offers
+// a gold EVOLUTION card that changes how the build plays. Duos combine two
+// element families. Every recipe rewards moving and fighting, not standing still.
+export const EVOLUTIONS = [
+  { id: 'evo_secondwind', name: 'Second Wind', icon: 'plus', requires: { regen: 4, fleet: 1 },
+    desc: () => 'Regeneration triples while you move, and hits no longer pause it while moving', mods: [{ stat: 'moveRegen', value: 2 }] },
+  { id: 'evo_harvest', name: 'Crimson Harvest', icon: 'drop', requires: { bloodthirst: 3, executioner: 1 },
+    desc: () => 'Critical hits restore 2% max HP and open 2 bleeding wounds', mods: [{ stat: 'critHeal', value: 0.02 }] },
+  { id: 'evo_maiden', name: 'Iron Maiden', icon: 'thorn', requires: { thorns: 3, bulwark: 1 },
+    desc: () => 'Every dash ends in a burst of spikes (4x your armor + weapon damage)', mods: [{ stat: 'dashSpikes', value: 1 }] },
+  { id: 'evo_crescent', name: 'Umbral Crescent', icon: 'spiral', requires: { shadowwave: 3, reach: 1 },
+    desc: () => 'Shadow waves grow huge and fly back to you, cutting twice', mods: [{ stat: 'shadowReturn', value: 1 }] },
+  { id: 'evo_wraith', name: 'Wraith Procession', icon: 'orbit', requires: { spectral: 4, phantomdash: 1 },
+    desc: () => 'Dashing flings your orbiting blades outward as piercing spectral bolts', mods: [{ stat: 'dashBlades', value: 1 }] },
+  { id: 'evo_livingstorm', name: 'Living Storm', icon: 'bolt', requires: { static: 4, quickstep: 1 },
+    desc: () => 'Moving charges you: every few steps, your next hit calls lightning on 5 foes', mods: [{ stat: 'stormStride', value: 1 }] },
+  { id: 'evo_solar', name: 'Solar Eclipse', icon: 'nova', requires: { combustion: 3, novapower: 1 },
+    desc: () => 'Your Nova grows 30% larger and sets everything it hits ablaze', mods: [{ stat: 'novaIgnite', value: 1 }, { stat: 'novaSize', value: 0.3 }] },
+  { id: 'duo_overload', duo: true, name: 'Overload', icon: 'bolt', requires: { ignite: 2, static: 2 },
+    desc: () => 'Lightning that strikes a burning enemy makes it explode', mods: [{ stat: 'overload', value: 1 }] },
+  { id: 'duo_bloodstorm', duo: true, name: 'Blood Storm', icon: 'drop', requires: { serrated: 2, static: 2 },
+    desc: () => 'Every lightning strike opens 2 bleeding wounds', mods: [{ stat: 'chainBleed', value: 2 }] },
+  { id: 'duo_ghostfire', duo: true, name: 'Ghostfire', icon: 'flame', requires: { spectral: 2, ignite: 2 },
+    desc: () => 'Your orbiting blades burn with spectral fire, igniting what they cut', mods: [{ stat: 'orbitIgnite', value: 1 }] },
+].map((e) => ({ ...e, evolution: true, rarity: 'evolution', tags: [], maxRank: 1 }));
+
+export const UPGRADE_BY_ID = Object.fromEntries([...UPGRADES, ...EVOLUTIONS].map((u) => [u.id, u]));
+
+/** Evolutions a given upgrade is part of. */
+export function evolutionsUsing(id) {
+  return EVOLUTIONS.filter((e) => id in e.requires);
+}
 
 // Offered when the pool runs dry so a level-up is never empty.
 export const FALLBACK_UPGRADES = [

@@ -2,6 +2,8 @@
 // change, so closing the app never loses progression. A run in progress
 // keeps a small "salvage" snapshot so an interrupted run still pays out.
 
+import { BIOMES, BIOME_ORDER } from '../data/biomes.js';
+
 const KEY = 'last10min.save.v1';
 const VERSION = 1;
 
@@ -29,6 +31,8 @@ export function defaultSave() {
     tutorialDone: false,
     pendingRun: null,
     seenUnlocks: [],
+    regions: {},
+    townTutorialDone: false,
   };
 }
 
@@ -54,6 +58,7 @@ export function migrate(data) {
     stats: { ...base.stats, ...(data.stats || {}) },
     settings: { ...base.settings, ...(data.settings || {}) },
     seenUnlocks: Array.isArray(data.seenUnlocks) ? data.seenUnlocks : [],
+    regions: { ...base.regions, ...(data.regions || {}) },
   };
 }
 
@@ -109,8 +114,22 @@ export function recordRun(save, result) {
   if (result.goldFound > rec.mostGold) rec.mostGold = result.goldFound;
   if (result.kills > rec.mostKills) rec.mostKills = result.kills;
 
+  // Regions: escaping one opens the next.
+  let regionUnlocked = null;
+  const id = result.biome || 'forest';
+  const reg = (save.regions[id] = save.regions[id] || { escapes: 0, runs: 0, best: 0 });
+  reg.runs++;
+  if (result.outcome === 'escaped') {
+    reg.escapes++;
+    reg.best = Math.max(reg.best, Math.round(result.elapsed));
+    if (reg.escapes === 1) {
+      const next = BIOME_ORDER.find((b) => BIOMES[b].unlockedBy === id);
+      if (next) regionUnlocked = BIOMES[next].name;
+    }
+  }
+
   save.embers += result.embers.total;
   save.totalEmbers += result.embers.total;
   save.pendingRun = null;
-  return { newRecords };
+  return { newRecords, regionUnlocked };
 }

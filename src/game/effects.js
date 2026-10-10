@@ -3,6 +3,9 @@
 
 const MAX_PARTICLES = 420;
 const MAX_NUMBERS = 60;
+const MAX_DECALS = 260;
+// How long each kind of ground mark lasts (seconds); they fade out at the end.
+const DECAL_LIFE = { step: 9, scorch: 40 };
 
 export class Effects {
   constructor() {
@@ -15,6 +18,7 @@ export class Effects {
     this.texts = [];
     this.afterimages = [];
     this.telegraphs = [];
+    this.decals = []; // lasting marks on the ground: bones, blood, scorch, footprints
     this.quality = 1; // 0 = low, 1 = high
     this.showNumbers = true;
   }
@@ -33,10 +37,22 @@ export class Effects {
     }
   }
 
-  number(x, y, value, color = '#f4f2ff', scale = 1) {
+  /** Floating number. Hits on the same target in quick succession merge into one number. */
+  number(x, y, value, color = '#f4f2ff', scale = 1, key = null) {
     if (!this.showNumbers) return;
+    if (key !== null && typeof value === 'number') {
+      for (const n of this.numbers) {
+        if (n.key === key && n.color === color && n.max - n.life < 0.3) {
+          n.value += value;
+          n.text = String(Math.round(n.value));
+          n.life = n.max;
+          n.scale = Math.max(n.scale, scale);
+          return;
+        }
+      }
+    }
     if (this.numbers.length >= MAX_NUMBERS) this.numbers.shift();
-    this.numbers.push({ x: x + (Math.random() - 0.5) * 6, y, vy: -28 - scale * 6, text: String(value), color, scale, life: 0.7, max: 0.7 });
+    this.numbers.push({ x: x + (Math.random() - 0.5) * 6, y, vy: -28 - scale * 6, text: String(value), value: typeof value === 'number' ? value : 0, key, color, scale, life: 0.7, max: 0.7 });
   }
 
   text(x, y, text, color = '#ffd36b', scale = 1, life = 1.1) {
@@ -57,6 +73,14 @@ export class Effects {
 
   beam(x, y, color, life = 2.5) {
     this.beams.push({ x, y, color, life, max: life });
+  }
+
+  /** Leave a mark on the ground. It stays for a while, then fades. */
+  decal(x, y, kind, variant = Math.floor(Math.random() * 4)) {
+    const cap = this.quality ? MAX_DECALS : 80;
+    if (this.decals.length >= cap) this.decals.shift();
+    const life = DECAL_LIFE[kind] || 50;
+    this.decals.push({ x: Math.round(x), y: Math.round(y), kind, variant, life, max: life });
   }
 
   afterimage(x, y, sprite, flip) {
@@ -95,5 +119,6 @@ export class Effects {
     step(this.bolts);
     step(this.beams);
     step(this.afterimages);
+    step(this.decals);
   }
 }

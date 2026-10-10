@@ -113,7 +113,7 @@ export class AudioEngine {
   play(name, opts = {}) {
     if (!this.ctx || this.ctx.state !== 'running' || this.sfxVolume <= 0) return;
     const now = this.ctx.currentTime;
-    const minGap = { hit: 0.04, die: 0.04, xp: 0.04, coin: 0.05, zap: 0.06, explode: 0.08, swing: 0.05, hurt: 0.1, lunge: 0.15, eliteSpawn: 0.5 }[name] ?? 0.03;
+    const minGap = { hit: 0.04, die: 0.04, xp: 0.04, coin: 0.05, zap: 0.06, explode: 0.08, swing: 0.05, hurt: 0.1, lunge: 0.15, eliteSpawn: 0.5, arrow: 0.08, rune: 0.12, runeBlast: 0.08, hazard: 0.25 }[name] ?? 0.03;
     if (now - (this.last.get(name) || 0) < minGap) return;
     this.last.set(name, now);
     const fn = SFX[name];
@@ -279,6 +279,11 @@ const SFX = {
     a.tone('triangle', 880, 0.2, 0.1, { delay: 0.1 });
     a.tone('triangle', 1320, 0.3, 0.08, { delay: 0.18 });
   },
+  brazier: (a) => {
+    a.noise(0.22, 0.13, { type: 'bandpass', freq: 1800, to: 300, q: 1.4 });
+    a.tone('square', 240, 0.14, 0.05, { to: 120, filter: { freq: 1400 } });
+  },
+  discover: (a) => [392, 523, 659].forEach((f, i) => a.tone('triangle', f, 0.5, 0.06, { delay: i * 0.09, attack: 0.03 })),
   chestBig: (a) => {
     SFX.chest(a);
     [587, 740, 880, 1175].forEach((f, i) => a.tone('triangle', f, 0.5, 0.07, { delay: 0.25 + i * 0.06 }));
@@ -356,6 +361,21 @@ const SFX = {
   },
   tick: (a) => a.tone('square', 1500, 0.03, 0.06),
   ui: (a) => a.tone('triangle', 900, 0.05, 0.06),
+  arrow: (a) => {
+    a.noise(0.08, 0.1, { type: 'bandpass', freq: 3000, to: 1200, q: 4 });
+    a.tone('triangle', 900, 0.05, 0.04, { to: 500 });
+  },
+  rune: (a) => a.tone('sine', 520, 0.4, 0.06, { to: 780, attack: 0.05 }),
+  runeBlast: (a) => {
+    a.noise(0.25, 0.22, { freq: 2400, to: 300 });
+    a.tone('sine', 160, 0.3, 0.25, { to: 60 });
+  },
+  rumble: (a) => a.noise(0.9, 0.12, { freq: 220, to: 120, attack: 0.2 }),
+  hazard: (a) => a.noise(0.08, 0.1, { type: 'bandpass', freq: 1600, q: 2 }),
+  door: (a) => {
+    a.noise(0.2, 0.1, { freq: 500, to: 200 });
+    a.tone('triangle', 330, 0.2, 0.06, { delay: 0.05 });
+  },
   heartbeat: (a) => {
     a.tone('sine', 60, 0.12, 0.35, { to: 40 });
     a.tone('sine', 55, 0.12, 0.25, { to: 38, delay: 0.16 });

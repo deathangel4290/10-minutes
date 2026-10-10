@@ -2,12 +2,16 @@
 // changed without touching systems code.
 
 export const TILE = 16;
-export const MAP_TILES = 80; // map is MAP_TILES x MAP_TILES tiles
 export const RUN_DURATION = 600; // seconds — the "10 minutes"
 
 // Target logical (game-pixel) width of the view in portrait. The canvas is
 // rendered at this low resolution and scaled up by an integer factor.
 export const TARGET_VIEW_WIDTH = 176;
+// In landscape the short side is the height, so the view is sized by it
+// instead: you see further left and right, and a little less up and down.
+export const TARGET_VIEW_HEIGHT_WIDE = 200;
+// Screens wider than this (width / height) use the landscape layout.
+export const LANDSCAPE_ASPECT = 1.15;
 
 // Danger phases, keyed by time REMAINING on the clock.
 // Each phase sets spawn pressure, enemy mix, loot quality and mood.
@@ -22,46 +26,50 @@ export const PHASES = [
     eliteChance: 0,
     itemLevel: 1,
     mix: { skeleton: 5, slime: 4, wolf: 1 },
-    darkness: 0.38,
+    darkness: 0.32,
+    healMult: 1,
     musicIntensity: 0,
   },
   {
     id: 1,
     until: 300,
     name: 'MEDIUM DANGER',
-    banner: { title: 'THE AIR GROWS COLD', sub: 'Stronger enemies stir. Better loot awaits.' },
+    banner: { title: 'THE AIR GROWS COLD', sub: 'Archers join the hunt. Better loot awaits.' },
     spawnRate: [0.9, 1.4],
     maxAlive: 40,
     eliteChance: 0.015,
     itemLevel: 2,
-    mix: { skeleton: 5, slime: 3, wolf: 3 },
-    darkness: 0.46,
+    mix: { skeleton: 5, slime: 3, wolf: 3, archer: 1 },
+    darkness: 0.4,
+    healMult: 0.9,
     musicIntensity: 1,
   },
   {
     id: 2,
     until: 120,
     name: 'HIGH DANGER',
-    banner: { title: 'THE ECLIPSE STIRS', sub: 'Elites hunt. Events grow common.' },
+    banner: { title: 'THE ECLIPSE STIRS', sub: 'Mages and elites hunt. Healing weakens.' },
     spawnRate: [1.5, 2.2],
     maxAlive: 60,
     eliteChance: 0.025,
     itemLevel: 3,
-    mix: { skeleton: 5, slime: 3, wolf: 4 },
-    darkness: 0.54,
+    mix: { skeleton: 5, slime: 3, wolf: 4, archer: 2, mage: 1.3 },
+    darkness: 0.48,
+    healMult: 0.75,
     musicIntensity: 2,
   },
   {
     id: 3,
     until: -1,
     name: 'EXTREME DANGER',
-    banner: { title: 'FINAL MINUTES', sub: 'Rare loot. Deadly foes. Reach a gate.' },
+    banner: { title: 'FINAL MINUTES', sub: 'Rare loot. Deadly foes. Healing is weak. Reach a gate.' },
     spawnRate: [2.6, 4.2],
     maxAlive: 95,
     eliteChance: 0.05,
     itemLevel: 4,
-    mix: { skeleton: 4, slime: 3, wolf: 5 },
-    darkness: 0.6,
+    mix: { skeleton: 4, slime: 3, wolf: 5, archer: 2.5, mage: 2.2 },
+    darkness: 0.56,
+    healMult: 0.6,
     musicIntensity: 3,
   },
 ];

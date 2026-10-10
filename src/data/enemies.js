@@ -18,6 +18,7 @@ export const ENEMIES = {
     gold: [0, 2],
     knockbackTaken: 1,
     deathColors: ['#d9d2bf', '#a59f8a', '#5a5374'],
+    decal: 'bones', // mark left on the ground
   },
   slime: {
     id: 'slime',
@@ -36,6 +37,7 @@ export const ENEMIES = {
     splitInto: 'slimeling',
     splitCount: 2,
     deathColors: ['#6fbf4a', '#b6f06a', '#2f5e34'],
+    decal: 'slime', // mark left on the ground
   },
   slimeling: {
     id: 'slimeling',
@@ -52,6 +54,7 @@ export const ENEMIES = {
     gold: [0, 1],
     knockbackTaken: 1.6,
     deathColors: ['#6fbf4a', '#b6f06a'],
+    decal: 'slime', // mark left on the ground
     noSpawn: true,
   },
   wolf: {
@@ -73,6 +76,49 @@ export const ENEMIES = {
     knockbackTaken: 1.1,
     packSize: [2, 3],
     deathColors: ['#8a84a6', '#5a5374', '#c9c6dc'],
+    decal: 'blood', // mark left on the ground
+  },
+  // Ranged enemies punish standing still: arrows travel, runes detonate where you stood.
+  archer: {
+    id: 'archer',
+    name: 'Skeleton Archer',
+    behavior: 'archer',
+    sprite: 'archer',
+    hp: 18,
+    speed: 30,
+    damage: 7,
+    radius: 5,
+    range: 125,
+    keepDist: [55, 95],
+    windup: 0.75,
+    attackCooldown: 2.3,
+    projSpeed: 108,
+    xp: 4,
+    gold: [0, 2],
+    knockbackTaken: 1.1,
+    deathColors: ['#d9d2bf', '#a59f8a', '#6e4a2c'],
+    decal: 'bones', // mark left on the ground
+  },
+  mage: {
+    id: 'mage',
+    name: 'Dark Mage',
+    behavior: 'caster',
+    sprite: 'mage',
+    hp: 26,
+    speed: 26,
+    damage: 15,
+    radius: 5,
+    range: 135,
+    keepDist: [70, 115],
+    windup: 0.55,
+    attackCooldown: 3.4,
+    runeDelay: 1.05,
+    runeRadius: 20,
+    xp: 5,
+    gold: [1, 3],
+    knockbackTaken: 1,
+    deathColors: ['#4a2370', '#7a3fc0', '#b68cff'],
+    decal: 'ash', // mark left on the ground
   },
   // The final-minutes champion: a giant elite skeleton that guards great loot.
   champion: {
@@ -93,6 +139,7 @@ export const ENEMIES = {
     gold: [80, 120],
     knockbackTaken: 0.05,
     deathColors: ['#d9d2bf', '#b68cff', '#7a3fc0', '#ff9a3c'],
+    decal: 'bones', // mark left on the ground
     noSpawn: true,
   },
 };

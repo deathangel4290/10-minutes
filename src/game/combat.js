@@ -3,15 +3,67 @@
 import { ELITE } from '../data/enemies.js';
 import { RUN_DURATION } from '../data/config.js';
 import { CURSED_ZONE } from '../data/events.js';
+import { angleDiff } from '../core/math.js';
 
 const BURN_BASE = 0.35; // burn DPS as a fraction of weapon damage
 const BLEED_BASE = 0.16; // per stack
 const BLEED_MAX_STACKS = 6;
 
 export class Combat {
+  /** A lightning line left by Thunderstride: shocks anything that touches it. */
+  addZapLine(x0, y0, x1, y1, dmg, life = 2.2) {
+    this.zapLines.push({ x0, y0, x1, y1, dmg, life, max: life, next: new Map() });
+  }
+
+  /** A burning patch left by Wildfire Sprint. */
+  addFirePatch(x, y, power, life = 2.6) {
+    if (this.firePatches.length > 80) this.firePatches.shift();
+    this.firePatches.push({ x, y, power, life, max: life });
+  }
+
+  updateSkillZones(dt) {
+    const run = this.run;
+    const t = run.time || 0;
+    let w = 0;
+    for (const z of this.zapLines) {
+      z.life -= dt;
+      if (z.life <= 0) continue;
+      const dx = z.x1 - z.x0;
+      const dy = z.y1 - z.y0;
+      const len2 = dx * dx + dy * dy || 1;
+      for (const e of run.enemies) {
+        if (e.dead || (z.next.get(e.id) || 0) > t) continue;
+        const k = Math.max(0, Math.min(1, ((e.x - z.x0) * dx + (e.y - 4 - z.y0) * dy) / len2));
+        const px = z.x0 + dx * k;
+        const py = z.y0 + dy * k;
+        if ((e.x - px) ** 2 + (e.y - 4 - py) ** 2 > (e.radius + 4) ** 2) continue;
+        z.next.set(e.id, t + 0.5);
+        this.hitEnemy(e, z.dmg, { source: 'skill', noCrit: true, kx: -dy, ky: dx, knock: 30 });
+        run.effects.bolt([[px, py - 10], [e.x, e.y - 6]], '#c4e4f5');
+      }
+      this.zapLines[w++] = z;
+    }
+    this.zapLines.length = w;
+    w = 0;
+    for (const f of this.firePatches) {
+      f.life -= dt;
+      if (f.life <= 0) continue;
+      for (const e of run.enemies) {
+        if (e.dead || e.burnT > 1.5) continue;
+        if ((e.x - f.x) ** 2 + (e.y - f.y) ** 2 < (e.radius + 6) ** 2) this.ignite(e, 1.6 * f.power, 3);
+      }
+      this.firePatches[w++] = f;
+    }
+    this.firePatches.length = w;
+  }
+
   constructor(run) {
+    this.zapLines = [];
+    this.firePatches = [];
     this.run = run;
     this.projectiles = [];
+    this.enemyProjectiles = [];
+    this.runes = [];
     this.pendingExplosions = [];
   }
 
@@ -56,7 +108,7 @@ export class Combat {
     run.stats.damageDealt += dmg;
 
     const h = e.def.scale ? 16 * e.def.scale : 14;
-    run.effects.number(e.x, e.y - h, dmg, crit ? '#ffab40' : opts.source === 'thorns' ? '#7fd65a' : '#f4f2ff', crit ? 2 : 1);
+    run.effects.number(e.x, e.y - h, dmg, crit ? '#ffab40' : opts.source === 'thorns' ? '#7fd65a' : '#f4f2ff', crit ? 2 : 1, e.id);
     if (crit && run.effects.quality) run.effects.burst(e.x, e.y - 6, ['#ffd36b', '#ff9a3c'], 5, 50, 0.25, 0);
 
     // Knockback and a short stagger (elites keep their poise).
@@ -74,7 +126,19 @@ export class Combat {
       }
     }
 
-    if (s.lifesteal > 0 && opts.source !== 'dot') p.heal(dmg * s.lifesteal);
+    // Lifesteal only from your own attacks (not thorns or DoTs), and capped per second.
+    const own = opts.source !== 'dot' && opts.source !== 'thorns';
+    if (s.lifesteal > 0 && own) p.lifestealHeal(dmg * s.lifesteal);
+    if (crit && own && s.raw.critHeal > 0) {
+      p.lifestealHeal(s.maxHp * s.raw.critHeal);
+      this.addBleed(e, 2);
+    }
+    // Living Storm: a charge built by moving is released by the next swing.
+    if (opts.source === 'melee' && p.stormCharged && !e.dead) {
+      p.stormCharged = false;
+      run.effects.bolt([[e.x + 4, e.y - 70], [e.x - 2, e.y - 40], [e.x + 1, e.y - 6]], '#c4e4f5');
+      this.chainLightning(e, s.damage * 1.4, 5);
+    }
 
     if (!opts.noProc) {
       const wd = s.damage;
@@ -105,6 +169,12 @@ export class Combat {
     if (e.champion) run.stats.champions++;
     const big = e.elite || e.champion;
     run.effects.burst(e.x, e.y - 6, e.def.deathColors, big ? 26 : 12, big ? 90 : 65, 0.55, 60);
+    // What it leaves behind: burned foes leave scorch, the rest their own remains.
+    const mark = e.burnT > 0 ? 'scorch' : e.def.decal;
+    if (mark) {
+      run.effects.decal(e.x, e.y - 1, mark);
+      if (big) for (let i = 0; i < (e.champion ? 4 : 2); i++) run.effects.decal(e.x + (Math.random() - 0.5) * 16, e.y + (Math.random() - 0.5) * 8, mark);
+    }
     run.hooks.sfx(big ? 'eliteDie' : 'die');
     if (big) {
       run.hooks.shake(e.champion ? 9 : 4);
@@ -122,6 +192,15 @@ export class Combat {
     if (gold > 0) run.pickups.dropGold(e.x, e.y, Math.round(gold));
 
     const rarityBump = (e.elite ? ELITE.dropRarityBump : 0) + (e.cursed ? CURSED_ZONE.rarityBump : 0);
+    if (e.elite || e.champion) {
+      // Skills come from elites: the first one in a run is guaranteed, so you meet the Skill button early.
+      const first = !p.skill && !run.skillDropped;
+      if (e.champion || first || run.rng.chance(0.14)) {
+        run.skillDropped = true;
+        run.pickups.dropItem(e.x + 6, e.y, run.pickups.rollItem({ forceKind: 'skill', bump: rarityBump, minRarity: e.champion ? 'rare' : 'common' }));
+      }
+    }
+    if (p.sprintT > 0) p.skillCd = Math.max(0, p.skillCd - 0.6); // Wildfire Sprint: kills cut the cooldown
     if (e.champion) {
       run.pickups.dropChest(e.x, e.y, run.rng.chance(0.45) ? 'legendary' : 'epic', { champion: true });
     } else if (e.elite && run.rng.chance(0.3)) {
@@ -146,6 +225,21 @@ export class Combat {
     if (p.stats.raw.explodeChance > 0 && run.rng.chance(p.stats.raw.explodeChance)) {
       this.pendingExplosions.push({ x: e.x, y: e.y - 4, dmg: p.stats.damage * (0.8 + p.stats.raw.explodePower) });
     }
+  }
+
+  /** Set an enemy alight. `mult` scales the burn relative to a normal ignite. */
+  ignite(e, mult = 1, time = 3) {
+    const s = this.run.player.stats;
+    e.burnT = Math.max(e.burnT, time);
+    e.burnDps = Math.max(e.burnDps, s.damage * BURN_BASE * mult * (1 + s.raw.burnPower));
+  }
+
+  /** Open bleeding wounds (stacks). */
+  addBleed(e, stacks = 1) {
+    const s = this.run.player.stats;
+    e.bleedStacks = Math.min(BLEED_MAX_STACKS, e.bleedStacks + stacks);
+    e.bleedT = 4;
+    e.bleedDps = Math.max(e.bleedDps, s.damage * BLEED_BASE * (1 + s.raw.bleedPower));
   }
 
   /** Damage-over-time ticks (burn, bleed). */
@@ -178,7 +272,7 @@ export class Combat {
     const dmg = Math.max(1, Math.round(amount));
     e.hp -= dmg;
     run.stats.damageDealt += dmg;
-    run.effects.number(e.x, e.y - 12, dmg, e.burnT > 0 ? '#ff9a3c' : '#e0384a', 1);
+    run.effects.number(e.x, e.y - 12, dmg, e.burnT > 0 ? '#ff9a3c' : '#e0384a', 1, e.id);
     if (e.hp <= 0) this.killEnemy(e);
   }
 
@@ -201,7 +295,11 @@ export class Combat {
       if (!best) break;
       hit.add(best.id);
       points.push([best.x, best.y - 6]);
+      const burning = best.burnT > 0;
       this.hitEnemy(best, dmg, { source: 'chain', noProc: true, noCrit: true });
+      const s = run.player.stats;
+      if (s.raw.chainBleed > 0 && !best.dead) this.addBleed(best, s.raw.chainBleed);
+      if (s.raw.overload > 0 && burning) this.pendingExplosions.push({ x: best.x, y: best.y - 4, dmg: s.damage * 0.9 });
       cur = best;
     }
     if (points.length > 1) {
@@ -210,9 +308,42 @@ export class Combat {
     }
   }
 
+  /**
+   * Smash braziers caught in a swing (aim + arc) or a blast (no aim).
+   * Returns how many broke.
+   */
+  hitBraziers(x, y, range, aim = null, arc = 0) {
+    const run = this.run;
+    let broke = 0;
+    for (const poi of run.pois) {
+      if (poi.type !== 'brazier' || !poi.lit) continue;
+      const dx = poi.x - x;
+      const dy = poi.y - 6 - y;
+      const d = Math.hypot(dx, dy);
+      if (d > range + 5) continue;
+      if (aim !== null && d > 10 && Math.abs(angleDiff(aim, Math.atan2(dy, dx))) > arc / 2) continue;
+      this.breakBrazier(poi);
+      broke++;
+    }
+    return broke;
+  }
+
+  breakBrazier(poi) {
+    const run = this.run;
+    poi.lit = false;
+    run.effects.burst(poi.x, poi.y - 8, ['#ffd36b', '#ff9a3c', '#c2561f', '#5a5374'], 16, 70, 0.6, 60);
+    run.effects.decal(poi.x, poi.y + 1, 'scorch');
+    run.hooks.sfx('brazier');
+    const ph = run.phase.id;
+    run.pickups.dropGold(poi.x, poi.y - 4, run.rng.int(6, 12) + ph * 5);
+    if (run.rng.chance(0.4)) run.pickups.dropXp(poi.x, poi.y - 4, 3 + ph * 2);
+    if (run.rng.chance(0.08)) run.pickups.dropPotion(poi.x, poi.y - 4);
+  }
+
   shockwave(x, y, radius, dmg, opts = {}) {
     const run = this.run;
     run.effects.ring(x, y, radius, opts.color || '#b68cff', 0.35, 2);
+    if (opts.source === 'nova' || opts.source === 'explode') this.hitBraziers(x, y, radius);
     if (run.effects.quality) run.effects.burst(x, y, [opts.color || '#b68cff', '#f4f2ff'], 14, radius * 2.2, 0.35, 0);
     for (const e of run.enemies) {
       if (e.dead) continue;
@@ -220,11 +351,32 @@ export class Combat {
       const dy = e.y - 4 - y;
       if (dx * dx + dy * dy > (radius + e.radius) ** 2) continue;
       this.hitEnemy(e, dmg, { source: opts.source || 'aoe', noProc: opts.noProc, kx: dx, ky: dy, knock: opts.knock || 60 });
+      if (opts.source === 'nova' && run.player.stats.raw.novaIgnite > 0 && !e.dead) this.ignite(e, 3, 4);
     }
   }
 
   spawnShadowWave(x, y, angle, dmg) {
+    if (this.run.player.stats.raw.shadowReturn > 0) {
+      // Umbral Crescent: a huge wave that flies out and comes back.
+      this.projectiles.push({ kind: 'shadow', big: true, x, y, vx: Math.cos(angle) * 160, vy: Math.sin(angle) * 160, angle, life: 1.15, turnAt: 0.6, dmg: dmg * 1.15, radius: 13, hits: new Set() });
+      return;
+    }
     this.projectiles.push({ kind: 'shadow', x, y, vx: Math.cos(angle) * 150, vy: Math.sin(angle) * 150, angle, life: 0.75, dmg, radius: 8, hits: new Set() });
+  }
+
+  /** A piercing spectral bolt (Wraith Procession). */
+  spawnSpectralBolt(x, y, angle, dmg) {
+    this.projectiles.push({ kind: 'spectral', x, y, vx: Math.cos(angle) * 200, vy: Math.sin(angle) * 200, angle, life: 0.55, dmg, radius: 7, hits: new Set() });
+  }
+
+  fireArrow(e, dirX, dirY) {
+    const sp = e.def.projSpeed;
+    this.enemyProjectiles.push({ kind: 'arrow', x: e.x + dirX * 6, y: e.y - 7 + dirY * 6, vx: dirX * sp, vy: dirY * sp, life: 1.6, dmg: e.damage, radius: 3, source: e });
+  }
+
+  /** A delayed blast: telegraphed circle on the ground that detonates after `delay`. */
+  addRune(x, y, radius, delay, dmg, opts = {}) {
+    this.runes.push({ x, y, radius, delay, t: 0, dmg, source: opts.source || null, color: opts.color || 'purple', hitsEnemies: !!opts.hitsEnemies, kind: opts.kind || 'rune', name: opts.name || null });
   }
 
   enemySlam(e, radius) {
@@ -238,11 +390,68 @@ export class Combat {
   }
 
   update(dt) {
+    this.updateSkillZones(dt);
     const run = this.run;
+    const pl = run.player;
+    // Enemy arrows.
+    let ew = 0;
+    for (const pr of this.enemyProjectiles) {
+      pr.life -= dt;
+      pr.x += pr.vx * dt;
+      pr.y += pr.vy * dt;
+      if (pr.life <= 0 || run.map.isSolidAt(pr.x, pr.y + 6)) continue;
+      if (!pl.dead && (pl.x - pr.x) ** 2 + (pl.y - 6 - pr.y) ** 2 < (pl.radius + pr.radius) ** 2) {
+        if (pl.dashT <= 0) {
+          pl.takeDamage(pr.dmg, pr.source || null);
+          continue;
+        }
+      }
+      this.enemyProjectiles[ew++] = pr;
+    }
+    this.enemyProjectiles.length = ew;
+
+    // Runes and eruptions.
+    let rw = 0;
+    for (const r of this.runes) {
+      r.t += dt;
+      if (r.t < r.delay) {
+        this.runes[rw++] = r;
+        continue;
+      }
+      const lava = r.color === 'orange';
+      run.effects.ring(r.x, r.y, r.radius, lava ? '#ff9a3c' : '#b68cff', 0.35, 2);
+      run.effects.decal(r.x, r.y, lava ? 'scorch' : 'ash');
+      run.effects.burst(r.x, r.y - 2, lava ? ['#ff9a3c', '#ffd36b', '#c2410c'] : ['#b68cff', '#7a3fc0', '#f4f2ff'], 14, 70, 0.45, lava ? 60 : 0);
+      run.hooks.sfx(lava ? 'explode' : 'runeBlast');
+      if (!pl.dead && (pl.x - r.x) ** 2 + (pl.y - r.y) ** 2 < (r.radius + pl.radius) ** 2) {
+        if (r.name) pl.takeDamage(r.dmg, null, r.name);
+        else pl.takeDamage(r.dmg, r.source || null);
+      }
+      if (r.hitsEnemies) {
+        for (const e of run.enemies) {
+          if (e.dead || (e.x - r.x) ** 2 + (e.y - r.y) ** 2 > (r.radius + e.radius) ** 2) continue;
+          e.hp -= r.dmg;
+          e.flash = 0.1;
+          run.effects.number(e.x, e.y - 12, Math.round(r.dmg), '#ff9a3c', 1);
+          if (e.hp <= 0) this.killEnemy(e);
+        }
+      }
+    }
+    this.runes.length = rw;
+
     // Projectiles.
     let w = 0;
     for (const pr of this.projectiles) {
       pr.life -= dt;
+      if (pr.turnAt && pr.life <= pr.turnAt) {
+        // Turn around and fly back through the crowd toward the player.
+        pr.turnAt = 0;
+        const a = Math.atan2(pl.y - 4 - pr.y, pl.x - pr.x);
+        pr.vx = Math.cos(a) * 170;
+        pr.vy = Math.sin(a) * 170;
+        pr.angle = a;
+        pr.hits.clear();
+      }
       pr.x += pr.vx * dt;
       pr.y += pr.vy * dt;
       if (pr.life <= 0 || run.map.isSolidAt(pr.x, pr.y + 4)) continue;
@@ -250,10 +459,11 @@ export class Combat {
         if (e.dead || pr.hits.has(e.id)) continue;
         if ((e.x - pr.x) ** 2 + (e.y - 5 - pr.y) ** 2 < (e.radius + pr.radius) ** 2) {
           pr.hits.add(e.id);
-          this.hitEnemy(e, pr.dmg, { source: 'shadow', kx: pr.vx, ky: pr.vy, knock: 50, noProc: true });
+          this.hitEnemy(e, pr.dmg, { source: pr.kind, kx: pr.vx, ky: pr.vy, knock: 50, noProc: true });
         }
       }
-      if (Math.random() < 0.7) run.effects.particle(pr.x + (Math.random() - 0.5) * 8, pr.y + (Math.random() - 0.5) * 8, 0, 0, 0.25, Math.random() < 0.5 ? '#7a3fc0' : '#b68cff', 1, 0, 0);
+      const trail = pr.kind === 'spectral' ? ['#c4e4f5', '#f4f2ff'] : ['#7a3fc0', '#b68cff'];
+      if (Math.random() < 0.7) run.effects.particle(pr.x + (Math.random() - 0.5) * 8, pr.y + (Math.random() - 0.5) * 8, 0, 0, 0.25, trail[Math.random() < 0.5 ? 0 : 1], 1, 0, 0);
       this.projectiles[w++] = pr;
     }
     this.projectiles.length = w;
@@ -264,6 +474,7 @@ export class Combat {
       this.pendingExplosions = [];
       for (const ex of list.slice(0, 6)) {
         this.shockwave(ex.x, ex.y, 26, ex.dmg, { source: 'explode', noProc: true, knock: 80, color: '#ff9a3c' });
+        run.effects.decal(ex.x, ex.y + 3, 'scorch');
         run.hooks.sfx('explode');
       }
     }

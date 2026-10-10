@@ -23,10 +23,12 @@ export class Enemy {
     this.cursed = cursed;
     this.guard = guard;
     this.champion = type === 'champion';
-    const hpMult = scale.hp * (elite ? ELITE.hpMult : 1) * (cursed ? CURSED_ZONE.hpMult : 1);
+    const diff = run.biome ? run.biome.difficulty : 1;
+    const hunted = run.hunted ? 1.15 : 1;
+    const hpMult = scale.hp * diff * (elite ? ELITE.hpMult : 1) * (cursed ? CURSED_ZONE.hpMult : 1);
     this.maxHp = Math.round(def.hp * hpMult);
     this.hp = this.maxHp;
-    this.damage = def.damage * scale.damage * (elite ? ELITE.damageMult : 1) * (cursed ? CURSED_ZONE.damageMult : 1);
+    this.damage = def.damage * scale.damage * diff * hunted * (elite ? ELITE.damageMult : 1) * (cursed ? CURSED_ZONE.damageMult : 1);
     const surge = run.timeLeft <= 60 ? 1.12 : 1;
     this.speed = def.speed * scale.speed * surge * (elite ? ELITE.speedMult : 1) * run.rng.range(0.92, 1.08);
     this.radius = def.radius + (elite ? 1 : 0);
@@ -51,6 +53,10 @@ export class Enemy {
     this.lungeHit = false;
     this.lungeDx = 0;
     this.lungeDy = 0;
+    this.aimX = 0;
+    this.aimY = 0;
+    this.strafe = run.rng.chance(0.5) ? 1 : -1;
+    this.hazardT = 0;
     this.summonT = 6;
     this.dead = false;
     this.ageNoSight = 0;
@@ -109,6 +115,65 @@ export function updateEnemy(run, e, dt) {
     case 'champion':
       championAI(run, e, dt, dx, dy, dist);
       break;
+    case 'archer':
+    case 'caster':
+      rangedAI(run, e, dt, dx, dy, dist);
+      break;
+  }
+}
+
+/** Archers and mages keep their distance, line up a shot, then fire. */
+function rangedAI(run, e, dt, dx, dy, dist) {
+  const p = run.player;
+  const def = e.def;
+  if (e.state === 'windup') {
+    e.timer -= dt;
+    if (e.timer <= 0) {
+      if (def.behavior === 'archer') {
+        run.combat.fireArrow(e, e.aimX, e.aimY);
+        run.hooks.sfx('arrow');
+      } else {
+        run.combat.addRune(e.aimX, e.aimY, def.runeRadius, def.runeDelay, e.damage, { source: e, color: 'purple' });
+        run.hooks.sfx('rune');
+      }
+      e.state = 'recover';
+      e.timer = 0.35;
+      e.attackCd = def.attackCooldown * run.rng.range(0.85, 1.15);
+    }
+    return;
+  }
+  if (e.state === 'recover') {
+    e.timer -= dt;
+    if (e.timer <= 0) e.state = 'chase';
+    return;
+  }
+  const sight = dist <= def.range && run.map.lineOfSight(e.x, e.y - 6, p.x, p.y - 6);
+  if (sight && e.attackCd <= 0) {
+    e.state = 'windup';
+    e.timer = def.windup * (e.elite ? 0.8 : 1);
+    if (def.behavior === 'archer') {
+      const l = dist || 1;
+      e.aimX = dx / l;
+      e.aimY = dy / l;
+    } else {
+      // Mages curse the ground where you stand right now.
+      e.aimX = p.x;
+      e.aimY = p.y;
+    }
+    e.facing = dx >= 0 ? 1 : -1;
+    return;
+  }
+  const [near, far] = def.keepDist;
+  if (!sight || dist > far) {
+    moveToward(run, e, dt, dx, dy, dist);
+  } else if (dist < near) {
+    e.x -= (dx / dist) * e.speed * dt;
+    e.y -= (dy / dist) * e.speed * dt;
+  } else {
+    // Drift sideways to make the shot angle less predictable.
+    e.x += (-dy / dist) * e.strafe * e.speed * 0.5 * dt;
+    e.y += (dx / dist) * e.strafe * e.speed * 0.5 * dt;
+    if (run.rng.chance(dt * 0.4)) e.strafe *= -1;
   }
 }
 

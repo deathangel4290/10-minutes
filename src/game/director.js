@@ -35,7 +35,8 @@ export class Director {
   spawnRing() {
     const run = this.run;
     const vr = Math.hypot(run.viewW, run.viewH) / 2;
-    return [vr + 10, vr + 60];
+    // When hunted, enemies appear just outside the screen instead of further out.
+    return run.hunted ? [vr * 0.75, vr + 20] : [vr + 10, vr + 60];
   }
 
   phaseProgress() {
@@ -61,8 +62,9 @@ export class Director {
     // Continuous spawning.
     const p = run.phase;
     const surge = run.timeLeft <= 60; // the last minute floods the field
-    const rate = lerp(p.spawnRate[0], p.spawnRate[1], this.phaseProgress()) * run.spawnRateMult * (surge ? 1.4 : 1);
-    const maxAlive = p.maxAlive + (surge ? 20 : 0);
+    const hunted = run.hunted ? 1.5 : 1;
+    const rate = lerp(p.spawnRate[0], p.spawnRate[1], this.phaseProgress()) * run.spawnRateMult * (surge ? 1.4 : 1) * hunted;
+    const maxAlive = p.maxAlive + (surge ? 20 : 0) + (run.hunted ? 10 : 0);
     const alive = run.enemies.length;
     this.acc += rate * dt;
     while (this.acc >= 1) {
@@ -94,7 +96,7 @@ export class Director {
 
     // Lazy camp guards.
     for (const poi of run.pois) {
-      if ((poi.type === 'camp' || poi.type === 'treasureGuard') && !poi.spawned) {
+      if ((poi.type === 'camp' || poi.type === 'treasureGuard' || poi.type === 'landmarkGuard') && !poi.spawned) {
         if ((poi.x - pl.x) ** 2 + (poi.y - pl.y) ** 2 < 170 * 170) this.spawnGuards(poi);
       }
     }
@@ -136,10 +138,22 @@ export class Director {
     }
   }
 
-  pickType() {
+  /** The phase's enemy mix, adjusted for the region (and hunters when you camp). */
+  currentMix() {
     const run = this.run;
-    const mix = run.phase.mix;
-    return run.rng.weightedKey(mix);
+    const mix = { ...run.phase.mix };
+    const b = run.biome;
+    for (const [k, v] of Object.entries(b.mixAdd || {})) mix[k] = (mix[k] || 0) + v;
+    for (const [k, v] of Object.entries(b.mixMult || {})) if (mix[k]) mix[k] *= v;
+    if (run.hunted) {
+      mix.archer = (mix.archer || 0) + 1.2;
+      mix.mage = (mix.mage || 0) + 0.8;
+    }
+    return mix;
+  }
+
+  pickType() {
+    return this.run.rng.weightedKey(this.currentMix());
   }
 
   spawnWave() {
@@ -150,7 +164,7 @@ export class Director {
     const pt = run.map.findOpenPoint(run.rng, pl.x, pl.y, minR, maxR);
     if (!pt) return;
     const cursedZone = run.map.inCursedZone(pt.x, pt.y);
-    const eliteChance = run.phase.eliteChance + (cursedZone ? CURSED_ZONE.eliteChanceBonus : 0) + run.eliteChanceBonus;
+    const eliteChance = run.phase.eliteChance + (cursedZone ? CURSED_ZONE.eliteChanceBonus : 0) + run.eliteChanceBonus + (run.hunted ? 0.04 : 0);
     const def = ENEMIES[type];
     const count = def.packSize ? run.rng.int(def.packSize[0], def.packSize[1]) : 1;
     for (let i = 0; i < count; i++) {
@@ -168,10 +182,11 @@ export class Director {
     const run = this.run;
     poi.spawned = true;
     const treasure = poi.type === 'treasureGuard';
-    const n = treasure ? 6 : run.rng.int(3, 5);
+    const landmark = poi.type === 'landmarkGuard';
+    const n = treasure ? 6 : landmark ? 4 : run.rng.int(3, 5);
     for (let i = 0; i < n; i++) {
-      const type = run.rng.weightedKey(treasure ? { skeleton: 3, wolf: 2 } : run.phase.mix);
-      const elite = treasure ? i < 2 : i === 0 && run.rng.chance(0.25 + run.phase.eliteChance);
+      const type = run.rng.weightedKey(treasure ? { skeleton: 3, wolf: 2, archer: 1.5 } : this.currentMix());
+      const elite = treasure ? i < 2 : landmark ? i === 0 : i === 0 && run.rng.chance(0.25 + run.phase.eliteChance);
       this.spawnNear(type, poi.x, poi.y, 6, treasure ? 40 : 34, { elite, guard: true, cursed: !!run.map.inCursedZone(poi.x, poi.y) });
     }
   }
