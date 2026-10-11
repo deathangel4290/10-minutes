@@ -8,6 +8,7 @@
     "start": "npx --yes http-server -c-1 -p 8080 .",
     "test": "node --test tests/*.test.js",
     "sim": "node tools/sim.mjs 10",
+    "e2e": "node tools/e2e.mjs",
     "icons": "node tools/make-icons.mjs"
   },
   "engines": {

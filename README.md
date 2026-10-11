@@ -85,6 +85,7 @@ Settings include an **auto-attack (one-handed)** mode.
 ```bash
 npm test             # unit tests (node:test): RNG, maps, regions, loot, gear, hazards, economy, saves, town, run flow
 npm run sim          # headless balance simulation: a bot plays 10 full runs and reports outcomes
+npm run e2e          # plays through every screen in a headless browser (portrait + landscape); needs Playwright
 node tools/sim.mjs 12 1 2 snow          # 12 Frozen Wastes runs, all unlocks, meta upgrades at rank 2
 node tools/sim.mjs 8 1 3 forest turtle  # a bot that stands still with a sustain build (it should die fast)
 npm run icons        # regenerate the PWA icons
