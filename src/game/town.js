@@ -103,6 +103,7 @@ export class Town {
       runes: [],
       zapLines: [],
       firePatches: [],
+      pendingExplosions: [],
       nearestEnemy: () => null,
       hitEnemy: () => null,
       hitBraziers: () => 0,

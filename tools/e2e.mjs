@@ -85,7 +85,17 @@ async function playthrough(browser, base, label, viewport) {
     await touch('touchEnd', 0, 0, 1);
   };
   const tap = async (sel) => {
-    await page.locator(sel).first().waitFor({ state: 'visible', timeout: 4000 });
+    await page
+      .locator(sel)
+      .first()
+      .waitFor({ state: 'visible', timeout: 4000 })
+      .catch(async () => {
+        const where = await g(() => {
+          const game = window.__game;
+          return `state=${game.state} paused=${game.paused} runModal=${game.run && game.run.modal && game.run.modal.kind} modal="${document.querySelector('#modal').innerText.slice(0, 40).replace(/\s+/g, ' ')}"`;
+        });
+        throw new Error(`"${sel}" never appeared (${where})`);
+      });
     // Menus ignore taps for 0.38s after they open (so a held attack thumb can't hit them).
     await page.waitForFunction(() => performance.now() - window.__game.screens.modalOpenedAt > 420);
     await page.locator(sel).first().tap();
@@ -99,6 +109,16 @@ async function playthrough(browser, base, label, viewport) {
       if (kind === 'levelup') await tap('[data-action="pickUpgrade"][data-index="0"]');
       else await tap('#modal [data-action="closeModal"], #modal [data-action="eventChoice"]');
     }
+  };
+  /** Calm the run down (no foes, no XP gems in flight) so a level-up can't pop up mid-step. */
+  const quiet = async () => {
+    await g(() => {
+      const r = window.__game.run;
+      if (!r) return;
+      r.enemies.length = 0;
+      r.pickups.list = r.pickups.list.filter((p) => p.kind !== 'xp');
+    });
+    await settle();
   };
   const step = async (name, fn) => {
     const before = errors.length;
@@ -119,6 +139,12 @@ async function playthrough(browser, base, label, viewport) {
   await wait(500);
 
   await step('title screen is up', async () => {
+    await page.locator('[data-action="town"]').waitFor({ state: 'visible' });
+  });
+  await step('settings from the title screen', async () => {
+    await tap('#screen [data-action="settings"]');
+    await tap('[data-action="toggleSetting"][data-key="screenShake"]');
+    await tap('#modal .btn-primary');
     await page.locator('[data-action="town"]').waitFor({ state: 'visible' });
   });
   await step('PLAY enters the town', async () => {
@@ -276,14 +302,14 @@ async function playthrough(browser, base, label, viewport) {
     await alive();
   });
   await step('equipment screen from the bag button', async () => {
-    await settle();
+    await quiet();
     await tap('#btn-gear');
     await tap('[data-action="gearSelect"]');
     await tap('[data-action="gearClose"]:visible');
     await alive();
   });
   await step('pause, settings, back, resume', async () => {
-    await settle();
+    await quiet();
     await tap('#btn-pause');
     await tap('[data-action="settings"]');
     await tap('#modal .btn-primary');
@@ -309,8 +335,7 @@ async function playthrough(browser, base, label, viewport) {
     await alive();
   });
   await step('Toll Gate refuses you when short on gold', async () => {
-    await g(() => (window.__game.run.enemies.length = 0));
-    await settle();
+    await quiet();
     await g(() => {
       const r = window.__game.run;
       r.enemies.length = 0;
@@ -324,7 +349,7 @@ async function playthrough(browser, base, label, viewport) {
     await tap('[data-action="closeModal"]');
   });
   await step('escape through a Rift Gate -> results -> town', async () => {
-    await settle();
+    await quiet();
     await g(() => {
       const r = window.__game.run;
       r.enemies.length = 0;
@@ -370,7 +395,7 @@ async function playthrough(browser, base, label, viewport) {
     await alive();
   });
   await step('abandon -> results -> town -> back to title', async () => {
-    await settle();
+    await quiet();
     await tap('#btn-pause');
     await tap('[data-action="abandonConfirm"]');
     await tap('[data-action="abandon"]');
@@ -380,17 +405,30 @@ async function playthrough(browser, base, label, viewport) {
     await tap('[data-town="title"]');
     await page.locator('[data-action="town"]').waitFor({ state: 'visible' });
   });
-  await step('every region loads and plays for a few seconds', async () => {
-    for (const biome of ['forest', 'snow', 'volcano', 'crypt']) {
-      await g((b) => {
+  await step('every region loads and plays for a few seconds (high and low graphics)', async () => {
+    for (const [i, biome] of ['forest', 'snow', 'volcano', 'crypt'].entries()) {
+      await g(([b, low]) => {
         const game = window.__game;
+        game.save.settings.graphics = low ? 'low' : 'high';
+        game.applySettings();
         game.startRun(b);
         game.tutorialStep = 99;
         game.run.player.takeDamage = () => 0;
-      }, biome);
+      }, [biome, i % 2 === 1]);
       await joystick(40, 20, 1200);
+      await settle();
       await alive();
     }
+  });
+  await step('reset progress from settings', async () => {
+    await g(() => window.__game.showTitle());
+    await tap('#screen [data-action="settings"]');
+    await tap('[data-action="resetConfirm"]');
+    await tap('[data-action="reset"]');
+    await page.locator('[data-action="town"]').waitFor({ state: 'visible', timeout: 4000 });
+    await tap('[data-action="town"]');
+    await state('town');
+    await alive();
   });
 
   if (errors.length) console.log(`  page errors (${label}):\n    ${errors.slice(0, 5).join('\n    ')}`);
@@ -404,8 +442,9 @@ const executablePath = fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-bro
 let browser;
 try {
   browser = await chromium.launch(executablePath && process.env.E2E_SYSTEM_CHROMIUM ? { executablePath } : {});
-  await playthrough(browser, base, 'portrait', { width: 390, height: 844 });
-  await playthrough(browser, base, 'landscape', { width: 844, height: 390 });
+  const only = process.env.E2E_ONLY;
+  if (!only || only === 'portrait') await playthrough(browser, base, 'portrait', { width: 390, height: 844 });
+  if (!only || only === 'landscape') await playthrough(browser, base, 'landscape', { width: 844, height: 390 });
 } finally {
   if (browser) await browser.close();
   server.close();
