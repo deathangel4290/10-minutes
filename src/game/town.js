@@ -95,7 +95,25 @@ export class Town {
     this.phase = { id: 0, darkness: 0.2, healMult: 1, itemLevel: 1, name: '' };
     this.enemies = [];
     this.pickups = { list: [] };
-    this.combat = { projectiles: [], enemyProjectiles: [], runes: [], nearestEnemy: () => null, hitEnemy: () => null, shockwave: () => {}, spawnShadowWave: () => {} };
+    // No fighting in town: a stand-in for everything the player and renderer may touch on a run's Combat.
+    const noop = () => {};
+    this.combat = {
+      projectiles: [],
+      enemyProjectiles: [],
+      runes: [],
+      zapLines: [],
+      firePatches: [],
+      nearestEnemy: () => null,
+      hitEnemy: () => null,
+      hitBraziers: () => 0,
+      shockwave: noop,
+      spawnShadowWave: noop,
+      spawnSpectralBolt: noop,
+      addZapLine: noop,
+      addFirePatch: noop,
+      addBleed: noop,
+      ignite: noop,
+    };
     this.effects = new Effects();
     this.pois = this.map.pois;
     this.explored = new Uint8Array(this.map.n * this.map.n).fill(1);

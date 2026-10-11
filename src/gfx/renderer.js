@@ -929,9 +929,11 @@ export class Renderer {
     }
     for (const r of run.effects.rings) light(r.x, r.y, r.radius, (r.life / r.max) * 0.8);
     for (const pr of run.combat.projectiles) light(pr.x, pr.y, 16, 0.6);
-    for (const z of run.combat.zapLines) light((z.x0 + z.x1) / 2, (z.y0 + z.y1) / 2, 26, 0.6 * (z.life / z.max));
-    for (let i = 0; i < run.combat.firePatches.length; i += 3) {
-      const f = run.combat.firePatches[i];
+    const zaps = run.combat.zapLines || [];
+    const fires = run.combat.firePatches || [];
+    for (const z of zaps) light((z.x0 + z.x1) / 2, (z.y0 + z.y1) / 2, 26, 0.6 * (z.life / z.max));
+    for (let i = 0; i < fires.length; i += 3) {
+      const f = fires[i];
       light(f.x, f.y - 2, 18, 0.6 * (f.life / f.max));
     }
     if (p.anchor) light(p.anchor.x, p.anchor.y, 22, 0.7);

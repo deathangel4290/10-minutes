@@ -526,11 +526,19 @@ class App {
 
   // ── Main loop ─────────────────────────────────────────────
   frame(now) {
+    // Schedule the next frame first, so one bad frame can never freeze the game.
+    requestAnimationFrame((t) => this.frame(t));
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
-    if ((this.state === 'run' || this.state === 'ending') && this.run) this.tickRun(dt);
-    else if (this.state === 'town' && this.town) this.tickTown(dt);
-    requestAnimationFrame((t) => this.frame(t));
+    try {
+      if ((this.state === 'run' || this.state === 'ending') && this.run) this.tickRun(dt);
+      else if (this.state === 'town' && this.town) this.tickTown(dt);
+    } catch (err) {
+      if (!this.frameErrorLogged) {
+        this.frameErrorLogged = true;
+        console.error('Frame error', err);
+      }
+    }
   }
 
   tickRun(dt) {
@@ -561,7 +569,7 @@ class App {
         this.acc += dt;
         while (this.acc >= STEP && steps < 5) {
           const edgeless = steps > 0;
-          run.update(STEP, edgeless ? { ...input, dash: false, nova: false, potion: false } : input);
+          run.update(STEP, edgeless ? { ...input, dash: false, nova: false, potion: false, skill: false } : input);
           this.acc -= STEP;
           steps++;
           if (run.modal || run.ended || this.hitstop > 0) break;
