@@ -246,9 +246,16 @@ export class Player {
 
   equipSkill(item) {
     const def = SKILLS[item.skill];
+    const swapping = !!this.skill;
     this.skill = item;
-    this.skillCd = 0;
-    this.skillCharges = def.charges || 0;
+    // Swapping keeps the cooldown running (no resetting it from the bag); a first skill starts ready.
+    if (swapping) {
+      this.skillCd = Math.max(this.skillCd, def.cooldown ? def.cooldown * 0.5 : 0);
+      this.skillCharges = def.charges ? Math.min(def.charges, this.skillCharges) : 0;
+    } else {
+      this.skillCd = 0;
+      this.skillCharges = def.charges || 0;
+    }
     this.skillDist = 0;
     this.anchor = null;
     this.sprintT = 0;

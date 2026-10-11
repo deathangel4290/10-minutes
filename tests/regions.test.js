@@ -300,3 +300,38 @@ test('the first elite you kill drops a skill', () => {
   run.combat.killEnemy(e);
   assert.ok(run.pickups.list.some((pk) => pk.kind === 'item' && pk.item.kind === 'skill'));
 });
+
+test('the town offers everything the renderer and player read from a run', async () => {
+  const { Combat } = await import('../src/game/combat.js');
+  const run = new Run({ seed: 51 });
+  const town = new Town({});
+  // Every array the renderer iterates on a run's combat must exist on the town's stand-in too.
+  for (const [key, value] of Object.entries(run.combat)) {
+    if (Array.isArray(value)) assert.ok(Array.isArray(town.combat[key]), `town.combat.${key} is missing`);
+  }
+  // And every Combat method the player calls.
+  for (const name of Object.getOwnPropertyNames(Combat.prototype)) {
+    if (name === 'constructor' || name === 'update' || name === 'updateSkillZones' || name === 'updateStatus') continue;
+    if (['nearestEnemy', 'hitEnemy', 'hitBraziers', 'shockwave', 'spawnShadowWave', 'spawnSpectralBolt', 'addZapLine', 'addFirePatch', 'addBleed', 'ignite'].includes(name)) {
+      assert.equal(typeof town.combat[name], 'function', `town.combat.${name} is missing`);
+    }
+  }
+  for (let i = 0; i < 120; i++) town.update(1 / 60, { ...idle, moveX: 1, dash: i === 5, skill: true, nova: true, potion: true });
+});
+
+test('swapping skills does not reset the cooldown', async () => {
+  const { makeSkill } = await import('../src/game/items.js');
+  const run = new Run({ seed: 53 });
+  const p = run.player;
+  const rng = new RNG(2);
+  run.collectItem(makeSkill(rng, { rarity: 'common', id: 'wildfire' }));
+  run.update(1 / 60, { ...idle, skill: true });
+  assert.ok(p.skillCd > 10, 'on cooldown after use');
+  const other = makeSkill(rng, { rarity: 'common', id: 'bloodrush' });
+  run.collectItem(other);
+  run.equipItem(other.uid);
+  assert.ok(p.skillCd > 0, 'still cooling down after the swap');
+  const back = run.bag.find((it) => it.kind === 'skill');
+  run.equipItem(back.uid);
+  assert.ok(p.skillCd > 0, 'swapping back does not refresh it either');
+});
